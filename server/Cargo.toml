@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/oracle", "crates/interface"]
+members = ["crates/oracle", "crates/interface", "crates/trade"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -20,3 +20,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 color-eyre = "0.6"
 eyre = "0.6"
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+dotenv = "0.15"
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+ctor = "0.2"
+jsonwebtoken = "9"
+uuid = { version = "1", features = ["v4"] }

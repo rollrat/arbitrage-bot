@@ -1,21 +1,12 @@
 use async_trait::async_trait;
-use thiserror::Error;
 
-use interface::{ExchangeId, PerpSnapshot, SpotSnapshot};
+use interface::{ExchangeError, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 pub mod binance;
 pub mod bitget;
 pub mod bithumb;
 pub mod bybit;
 pub mod okx;
-
-#[derive(Error, Debug)]
-pub enum ExchangeError {
-    #[error("http error: {0}")]
-    Http(#[from] reqwest::Error),
-    #[error("other error: {0}")]
-    Other(String),
-}
 
 #[async_trait]
 pub trait PerpExchange: Send + Sync {

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExchangeId {
@@ -77,4 +78,72 @@ pub struct SpotData {
     pub currency: Currency,
     pub price: f64,
     pub vol_24h_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Asset {
+    pub currency: String,
+    pub total: f64,     // 총 보유량
+    pub available: f64, // 사용 가능한 잔액
+    pub in_use: f64,    // 주문에 사용 중인 잔액 (locked)
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderBook {
+    pub exchange: ExchangeId,
+    pub symbol: String,
+    pub bids: Vec<OrderBookEntry>, // 매수 주문 (가격 높은 순)
+    pub asks: Vec<OrderBookEntry>, // 매도 주문 (가격 낮은 순)
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderBookEntry {
+    pub price: f64,
+    pub quantity: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MarketType {
+    KRW,           // 원화 마켓
+    USDT,          // USDT 마켓
+    BTC,           // BTC 마켓
+    Other(String), // 기타 마켓
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeeInfo {
+    pub maker: f64, // 메이커 수수료 (예: 0.0004 = 0.04%)
+    pub taker: f64, // 테이커 수수료 (예: 0.0004 = 0.04%)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepositWithdrawalFee {
+    pub currency: String,
+    pub deposit_fee: f64,    // 입금 수수료
+    pub withdrawal_fee: f64, // 출금 수수료
+    pub updated_at: DateTime<Utc>,
+}
+
+impl FeeInfo {
+    pub fn new(maker: f64, taker: f64) -> Self {
+        Self { maker, taker }
+    }
+
+    /// 수수료 무료
+    pub fn free() -> Self {
+        Self {
+            maker: 0.0,
+            taker: 0.0,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ExchangeError {
+    #[error("http error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("other error: {0}")]
+    Other(String),
 }
