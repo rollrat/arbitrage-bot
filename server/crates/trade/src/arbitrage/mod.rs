@@ -1,5 +1,3 @@
-use thiserror::Error;
-
 pub mod binance_trader;
 pub mod state;
 pub mod strategy;

@@ -118,10 +118,10 @@ impl BasisArbitrageStrategy {
         (futures_mark - spot_price) / spot_price * 10000.0
     }
 
-    /// 명목가에서 수량 계산
+    /// 명목가에서 수량 계산 (스팟 기준)
     pub fn size_from_notional(&self, spot_price: f64) -> f64 {
         let qty = self.params.notional / spot_price;
-        BinanceTrader::clamp_quantity(&self.params.symbol, qty)
+        self.trader.clamp_spot_quantity(&self.params.symbol, qty)
     }
 
     /// Carry 포지션 오픈: 스팟 롱 + 선물 숏
@@ -141,8 +141,8 @@ impl BasisArbitrageStrategy {
         }
 
         // 스팟과 선물의 수량을 각각 clamp하고, 더 작은 쪽 사용
-        let spot_qty = BinanceTrader::clamp_quantity(&self.params.symbol, qty);
-        let fut_qty = BinanceTrader::clamp_quantity(&self.params.symbol, qty);
+        let spot_qty = self.trader.clamp_spot_quantity(&self.params.symbol, qty);
+        let fut_qty = self.trader.clamp_futures_quantity(&self.params.symbol, qty);
         let use_qty = spot_qty.min(fut_qty);
 
         if use_qty <= 0.0 {
@@ -221,7 +221,9 @@ impl BasisArbitrageStrategy {
         let base_asset = BinanceTrader::base_asset_from_symbol(&self.params.symbol);
         let free = self.trader.get_spot_balance(&base_asset).await?;
         let available_qty = qty.min(free);
-        let use_qty = BinanceTrader::clamp_quantity(&self.params.symbol, available_qty);
+        let use_qty = self
+            .trader
+            .clamp_spot_quantity(&self.params.symbol, available_qty);
 
         if use_qty <= 0.0 {
             return Err(ExchangeError::Other(format!(
@@ -231,7 +233,7 @@ impl BasisArbitrageStrategy {
         }
 
         // 선물 수량도 clamp
-        let fut_qty = BinanceTrader::clamp_quantity(&self.params.symbol, qty);
+        let fut_qty = self.trader.clamp_futures_quantity(&self.params.symbol, qty);
         let final_qty = use_qty.min(fut_qty);
 
         if final_qty <= 0.0 {
@@ -357,6 +359,20 @@ impl BasisArbitrageStrategy {
     /// - 수수료, 슬리피지, 펀딩 비용은 별도로 추적하지 않고, entry_bps/exit_bps 설정에
     ///   간접적으로 녹여서 사용해야 한다.
     pub async fn run_loop(&self) -> Result<(), ExchangeError> {
+        // exchangeInfo 로드 (스팟 및 선물 LOT_SIZE 필터 캐싱)
+        info!("Loading spot exchangeInfo...");
+        self.trader.load_spot_exchange_info().await.map_err(|e| {
+            ExchangeError::Other(format!("Failed to load spot exchangeInfo: {}", e))
+        })?;
+
+        info!("Loading futures exchangeInfo...");
+        self.trader
+            .load_futures_exchange_info()
+            .await
+            .map_err(|e| {
+                ExchangeError::Other(format!("Failed to load futures exchangeInfo: {}", e))
+            })?;
+
         // 선물 설정 확인
         self.trader
             .ensure_futures_setup(

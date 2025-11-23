@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::RwLock;
 
 use exchanges::{AssetExchange, BinanceClient};
 use interface::ExchangeError;
@@ -17,9 +19,21 @@ pub struct OrderResponse {
     pub extra: serde_json::Value,
 }
 
+/// Binance LOT_SIZE 필터 정보
+#[derive(Debug, Clone, Copy)]
+pub struct LotSizeFilter {
+    pub min_qty: f64,
+    pub max_qty: f64,
+    pub step_size: f64,
+}
+
 pub struct BinanceTrader {
     spot_client: BinanceClient,
     futures_client: BinanceClient,
+    /// 스팟 심볼별 LOT_SIZE 필터 캐시
+    spot_lot_size_cache: RwLock<HashMap<String, LotSizeFilter>>,
+    /// 선물 심볼별 LOT_SIZE 필터 캐시
+    futures_lot_size_cache: RwLock<HashMap<String, LotSizeFilter>>,
 }
 
 impl BinanceTrader {
@@ -32,7 +46,205 @@ impl BinanceTrader {
         Ok(Self {
             spot_client,
             futures_client,
+            spot_lot_size_cache: RwLock::new(HashMap::new()),
+            futures_lot_size_cache: RwLock::new(HashMap::new()),
         })
+    }
+
+    /// 스팟 exchangeInfo를 로드하여 LOT_SIZE 필터를 캐시에 저장
+    pub async fn load_spot_exchange_info(&self) -> Result<(), ExchangeError> {
+        let url = format!("{}/api/v3/exchangeInfo", SPOT_BASE_URL);
+
+        let response = self
+            .spot_client
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ExchangeError::Other(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if !status.is_success() {
+            return Err(ExchangeError::Other(format!(
+                "Spot exchangeInfo API error: status {}, response: {}",
+                status,
+                response_text.chars().take(200).collect::<String>()
+            )));
+        }
+
+        let resp: serde_json::Value = serde_json::from_str(&response_text)
+            .map_err(|e| ExchangeError::Other(format!("Failed to parse exchangeInfo: {}", e)))?;
+
+        let mut cache = self.spot_lot_size_cache.write().unwrap();
+        cache.clear();
+
+        if let Some(symbols) = resp.get("symbols").and_then(|v| v.as_array()) {
+            for symbol_info in symbols {
+                let symbol = match symbol_info.get("symbol").and_then(|v| v.as_str()) {
+                    Some(sym) => sym.to_string(),
+                    None => continue,
+                };
+
+                if let Some(filters) = symbol_info.get("filters").and_then(|v| v.as_array()) {
+                    for filter in filters {
+                        let filter_type = filter.get("filterType").and_then(|v| v.as_str());
+                        if filter_type == Some("LOT_SIZE") {
+                            let min_qty = filter
+                                .get("minQty")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+
+                            let max_qty = filter
+                                .get("maxQty")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(f64::MAX);
+
+                            let step_size = filter
+                                .get("stepSize")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(1.0);
+
+                            cache.insert(
+                                symbol.clone(),
+                                LotSizeFilter {
+                                    min_qty,
+                                    max_qty,
+                                    step_size,
+                                },
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Loaded {} spot symbols LOT_SIZE filters", cache.len());
+        Ok(())
+    }
+
+    /// 선물 exchangeInfo를 로드하여 LOT_SIZE 필터를 캐시에 저장
+    pub async fn load_futures_exchange_info(&self) -> Result<(), ExchangeError> {
+        let url = format!("{}/fapi/v1/exchangeInfo", FUTURES_BASE_URL);
+
+        let response = self
+            .futures_client
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ExchangeError::Other(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if !status.is_success() {
+            return Err(ExchangeError::Other(format!(
+                "Futures exchangeInfo API error: status {}, response: {}",
+                status,
+                response_text.chars().take(200).collect::<String>()
+            )));
+        }
+
+        let resp: serde_json::Value = serde_json::from_str(&response_text)
+            .map_err(|e| ExchangeError::Other(format!("Failed to parse exchangeInfo: {}", e)))?;
+
+        let mut cache = self.futures_lot_size_cache.write().unwrap();
+        cache.clear();
+
+        if let Some(symbols) = resp.get("symbols").and_then(|v| v.as_array()) {
+            for symbol_info in symbols {
+                let symbol = match symbol_info.get("symbol").and_then(|v| v.as_str()) {
+                    Some(sym) => sym.to_string(),
+                    None => continue,
+                };
+
+                if let Some(filters) = symbol_info.get("filters").and_then(|v| v.as_array()) {
+                    for filter in filters {
+                        let filter_type = filter.get("filterType").and_then(|v| v.as_str());
+                        if filter_type == Some("LOT_SIZE") {
+                            let min_qty = filter
+                                .get("minQty")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+
+                            let max_qty = filter
+                                .get("maxQty")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(f64::MAX);
+
+                            let step_size = filter
+                                .get("stepSize")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(1.0);
+
+                            cache.insert(
+                                symbol.clone(),
+                                LotSizeFilter {
+                                    min_qty,
+                                    max_qty,
+                                    step_size,
+                                },
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Loaded {} futures symbols LOT_SIZE filters", cache.len());
+        Ok(())
+    }
+
+    /// 스팟 심볼의 LOT_SIZE 필터 가져오기
+    fn get_spot_lot_size(&self, symbol: &str) -> Option<LotSizeFilter> {
+        self.spot_lot_size_cache
+            .read()
+            .unwrap()
+            .get(symbol)
+            .copied()
+    }
+
+    /// 선물 심볼의 LOT_SIZE 필터 가져오기
+    fn get_futures_lot_size(&self, symbol: &str) -> Option<LotSizeFilter> {
+        self.futures_lot_size_cache
+            .read()
+            .unwrap()
+            .get(symbol)
+            .copied()
+    }
+
+    /// LOT_SIZE 필터를 사용하여 수량을 clamp하는 헬퍼 함수
+    fn clamp_quantity_with_filter(filter: LotSizeFilter, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+
+        let step = filter.step_size;
+        if step <= 0.0 {
+            return qty;
+        }
+
+        // step 단위로 내림
+        let steps = (qty / step).floor();
+        let clamped = steps * step;
+
+        if clamped < filter.min_qty {
+            0.0
+        } else if clamped > filter.max_qty {
+            filter.max_qty
+        } else {
+            clamped
+        }
     }
 
     /// 스팟 잔고 조회
@@ -125,11 +337,43 @@ impl BinanceTrader {
         }
     }
 
-    /// 수량을 거래소 규칙에 맞게 조정 (LOT_SIZE)
-    pub fn clamp_quantity(symbol: &str, qty: f64) -> f64 {
-        // Binance의 일반적인 step size는 0.001 (BTC의 경우)
-        // 실제로는 거래소 API에서 exchange info를 가져와야 하지만,
-        // 여기서는 간단히 0.001 단위로 반올림
+    /// 스팟 수량을 거래소 규칙에 맞게 조정 (LOT_SIZE)
+    /// exchangeInfo에서 가져온 실제 LOT_SIZE 필터를 사용
+    pub fn clamp_spot_quantity(&self, symbol: &str, qty: f64) -> f64 {
+        if let Some(filter) = self.get_spot_lot_size(symbol) {
+            Self::clamp_quantity_with_filter(filter, qty)
+        } else {
+            // LOT_SIZE 정보를 못 찾으면 원래 qty를 반환
+            // (상위에서 에러 처리하거나, exchangeInfo를 다시 로드해야 함)
+            tracing::warn!(
+                "LOT_SIZE filter not found for spot symbol: {}. Using original quantity.",
+                symbol
+            );
+            qty
+        }
+    }
+
+    /// 선물 수량을 거래소 규칙에 맞게 조정 (LOT_SIZE)
+    /// exchangeInfo에서 가져온 실제 LOT_SIZE 필터를 사용
+    pub fn clamp_futures_quantity(&self, symbol: &str, qty: f64) -> f64 {
+        if let Some(filter) = self.get_futures_lot_size(symbol) {
+            Self::clamp_quantity_with_filter(filter, qty)
+        } else {
+            // LOT_SIZE 정보를 못 찾으면 원래 qty를 반환
+            tracing::warn!(
+                "LOT_SIZE filter not found for futures symbol: {}. Using original quantity.",
+                symbol
+            );
+            qty
+        }
+    }
+
+    /// 레거시 호환성을 위한 정적 메서드 (deprecated)
+    /// 실제로는 clamp_spot_quantity 또는 clamp_futures_quantity를 사용해야 함
+    #[deprecated(note = "Use clamp_spot_quantity or clamp_futures_quantity instead")]
+    pub fn clamp_quantity(_symbol: &str, qty: f64) -> f64 {
+        // 하위 호환성을 위해 간단한 구현 유지
+        // 실제 사용 시에는 인스턴스 메서드를 사용해야 함
         let step = 0.001;
         (qty / step).floor() * step
     }
