@@ -6,12 +6,13 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 mod collector;
 mod exchange;
+mod exchange_rate;
 mod model;
 mod server;
 
 use crate::exchange::{
-    BinanceClient, BinanceSpotClient, BitgetClient, BitgetSpotClient, BybitClient, BybitSpotClient,
-    OkxClient, OkxSpotClient, PerpExchange, SpotExchange,
+    BinanceClient, BinanceSpotClient, BitgetClient, BitgetSpotClient, BithumbSpotClient,
+    BybitClient, BybitSpotClient, OkxClient, OkxSpotClient, PerpExchange, SpotExchange,
 };
 use crate::server::AppState;
 
@@ -41,6 +42,7 @@ async fn main() -> eyre::Result<()> {
         Arc::new(BybitSpotClient::new()),
         Arc::new(OkxSpotClient::new()),
         Arc::new(BitgetSpotClient::new()),
+        Arc::new(BithumbSpotClient::new()),
     ];
 
     // start background collector

@@ -16,7 +16,13 @@ import { IconAlertCircle, IconRefresh } from "@tabler/icons-react";
 import SnapshotTable from "./components/SnapshotTable";
 import type { UnifiedSnapshot, ExchangeId } from "./types";
 
-const EXCHANGES: ExchangeId[] = ["Binance", "Bybit", "Okx", "Bitget"];
+const EXCHANGES: ExchangeId[] = [
+  "Binance",
+  "Bybit",
+  "Okx",
+  "Bitget",
+  "Bithumb",
+];
 
 function App() {
   const [snapshots, setSnapshots] = useState<UnifiedSnapshot[]>([]);
@@ -28,7 +34,8 @@ function App() {
 
   const fetchSnapshots = async () => {
     try {
-      const response = await fetch("https://koromo.cc/perp/unified-snapshots");
+      // const response = await fetch("https://koromo.cc/perp/unified-snapshots");
+      const response = await fetch("http://localhost:12090/unified-snapshots");
       if (!response.ok) {
         throw new Error("데이터를 가져오는데 실패했습니다");
       }
@@ -57,9 +64,14 @@ function App() {
   const filteredSnapshots = useMemo(() => {
     return snapshots.filter(
       (snapshot) =>
-        selectedExchanges.includes(snapshot.exchange) && snapshot.perp !== null // perp가 없는 경우 제외
+        selectedExchanges.includes(snapshot.exchange) &&
+        (snapshot.perp !== null || snapshot.spot !== null) // perp 또는 spot이 있는 경우만 표시
     );
   }, [snapshots, selectedExchanges]);
+
+  // 첫 번째 snapshot에서 환율 정보 가져오기
+  const exchangeRates =
+    snapshots.length > 0 ? snapshots[0].exchange_rates : null;
 
   const handleExchangeToggle = (exchange: ExchangeId) => {
     setSelectedExchanges((prev) =>
@@ -120,6 +132,47 @@ function App() {
             </Badge>
           </Group>
         </Group>
+        {exchangeRates && (
+          <Group gap="md" wrap="wrap">
+            <Badge variant="light" color="gray">
+              <Text size="xs" fw={500}>
+                USD/KRW: ₩
+                {exchangeRates.usd_krw.toLocaleString("ko-KR", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                })}{" "}
+                (exrate-api)
+              </Text>
+            </Badge>
+            <Badge variant="light" color="blue">
+              <Text size="xs" fw={500}>
+                USDT/KRW: ₩
+                {exchangeRates.usdt_krw.toLocaleString("ko-KR", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                })}{" "}
+                (
+                {((exchangeRates.usdt_krw - exchangeRates.usd_krw) /
+                  exchangeRates.usd_krw) *
+                  100 >
+                0
+                  ? "+"
+                  : ""}
+                {(
+                  ((exchangeRates.usdt_krw - exchangeRates.usd_krw) /
+                    exchangeRates.usd_krw) *
+                  100
+                ).toFixed(2)}
+                %, Bithumb)
+              </Text>
+            </Badge>
+            <Badge variant="light" color="yellow">
+              <Text size="xs" fw={500}>
+                USDT/USD: {exchangeRates.usdt_usd.toFixed(4)} (Binance)
+              </Text>
+            </Badge>
+          </Group>
+        )}
         <Group gap="xs">
           <Text size="sm" fw={500}>
             거래소 필터:
@@ -148,7 +201,10 @@ function App() {
           minHeight: 0,
         }}
       >
-        <SnapshotTable snapshots={filteredSnapshots} />
+        <SnapshotTable
+          snapshots={filteredSnapshots}
+          exchangeRates={exchangeRates}
+        />
       </Paper>
     </Container>
   );

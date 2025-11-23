@@ -5,6 +5,7 @@ use crate::model::{ExchangeId, PerpSnapshot, SpotSnapshot};
 
 pub mod binance;
 pub mod bitget;
+pub mod bithumb;
 pub mod bybit;
 pub mod okx;
 
@@ -33,5 +34,6 @@ pub trait SpotExchange: Send + Sync {
 // Convenience re-exports
 pub use binance::{BinanceClient, BinanceSpotClient};
 pub use bitget::{BitgetClient, BitgetSpotClient};
+pub use bithumb::BithumbSpotClient;
 pub use bybit::{BybitClient, BybitSpotClient};
 pub use okx::{OkxClient, OkxSpotClient};

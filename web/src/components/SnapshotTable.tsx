@@ -1,5 +1,14 @@
 import { useState, useMemo, useRef, memo, useCallback } from "react";
-import { Table, Text, Badge, Group, Center, Button } from "@mantine/core";
+import {
+  Table,
+  Text,
+  Badge,
+  Group,
+  Center,
+  Button,
+  Tooltip,
+  Stack,
+} from "@mantine/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   IconChevronUp,
@@ -8,10 +17,16 @@ import {
   IconChartLine,
   IconCoin,
 } from "@tabler/icons-react";
-import type { UnifiedSnapshot, SortField, SortDirection } from "../types";
+import type {
+  UnifiedSnapshot,
+  SortField,
+  SortDirection,
+  Currency,
+} from "../types";
 
 interface SnapshotTableProps {
   snapshots: UnifiedSnapshot[];
+  exchangeRates: { usd_krw: number; usdt_usd: number; usdt_krw: number } | null;
 }
 
 // Row 컴포넌트를 메모이제이션하여 불필요한 리렌더링 방지
@@ -22,6 +37,7 @@ const TableRow = memo(
     formatOI,
     formatVol,
     formatFundingRate,
+    formatPrice,
     formatPerpSpotGap,
     getTimeUntilFunding,
     getExchangeBadgeColor,
@@ -29,12 +45,15 @@ const TableRow = memo(
     getExchangeUrl,
     getSpotUrl,
     hasSpotData,
+    exchangeRates,
+    allSpotSnapshots,
   }: {
     snapshot: UnifiedSnapshot;
     formatSymbol: (symbol: string) => string;
     formatOI: (oi: number) => string;
     formatVol: (vol: number) => string;
     formatFundingRate: (rate: number) => string;
+    formatPrice: (price: number, currency: Currency) => string;
     formatPerpSpotGap: (perpPrice: number, spotPrice: number | null) => string;
     getTimeUntilFunding: (nextFundingTime: string | null) => string;
     getExchangeBadgeColor: (exchange: string) => string;
@@ -42,8 +61,18 @@ const TableRow = memo(
     getExchangeUrl: (exchange: string, symbol: string) => string;
     getSpotUrl: (exchange: string, symbol: string) => string;
     hasSpotData: boolean;
+    exchangeRates: {
+      usd_krw: number;
+      usdt_usd: number;
+      usdt_krw: number;
+    } | null;
+    allSpotSnapshots: Array<{
+      exchange: string;
+      symbol: string;
+      spot: { currency: Currency; price: number } | null;
+    }>;
   }) => {
-    const perp = snapshot.perp!; // perp가 없는 경우는 필터링되어 있음
+    const perp = snapshot.perp; // perp가 null일 수 있음 (빗썸 등)
 
     return (
       <Table.Tr>
@@ -73,32 +102,180 @@ const TableRow = memo(
           </Text>
         </Table.Td>
         <Table.Td style={{ width: "140px" }}>
-          <Text fw={500}>
-            $
-            {perp.mark_price.toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
-          </Text>
+          {perp ? (
+            <Text fw={500}>{formatPrice(perp.mark_price, perp.currency)}</Text>
+          ) : (
+            <Text c="dimmed">-</Text>
+          )}
         </Table.Td>
         {hasSpotData && (
-          <Table.Td style={{ width: "140px" }}>
-            {snapshot.spot ? (
-              <Text fw={500} c="dimmed">
-                $
-                {snapshot.spot.price.toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </Text>
-            ) : (
-              <Text c="dimmed">-</Text>
-            )}
-          </Table.Td>
+          <>
+            <Table.Td style={{ width: "140px" }}>
+              {snapshot.spot ? (
+                <Tooltip
+                  withArrow
+                  multiline
+                  w={280}
+                  label={
+                    exchangeRates ? (
+                      <Stack gap={4}>
+                        {(() => {
+                          // 현재 거래소의 USDT 기준 가격 계산
+                          const currentUsdtPrice =
+                            snapshot.spot.currency === "KRW"
+                              ? (snapshot.spot.price / exchangeRates.usd_krw) *
+                                exchangeRates.usdt_usd
+                              : snapshot.spot.currency === "USD"
+                              ? snapshot.spot.price * exchangeRates.usdt_usd
+                              : snapshot.spot.price;
+
+                          // 원화 환전 가격 (USD/KRW 환율 사용)
+                          const currentKrwPrice =
+                            currentUsdtPrice * exchangeRates.usd_krw;
+                          // USDT/KRW 환산 가격
+                          const currentUsdtKrwPrice =
+                            currentUsdtPrice * exchangeRates.usdt_krw;
+
+                          return (
+                            <>
+                              <Stack gap={2}>
+                                <Text size="xs" fw={600}>
+                                  {snapshot.exchange}:
+                                </Text>
+                                <Text size="xs" pl={8}>
+                                  USDT: {formatPrice(currentUsdtPrice, "USDT")}
+                                </Text>
+                                <Text size="xs" pl={8}>
+                                  KRW: {formatPrice(currentKrwPrice, "KRW")}
+                                </Text>
+                                <Text size="xs" pl={8}>
+                                  USDT/KRW:{" "}
+                                  {formatPrice(currentUsdtKrwPrice, "KRW")}
+                                </Text>
+                              </Stack>
+                              {allSpotSnapshots
+                                .filter(
+                                  (s) =>
+                                    s.symbol === snapshot.symbol &&
+                                    s.exchange !== snapshot.exchange &&
+                                    s.spot !== null
+                                )
+                                .map((s) => {
+                                  // 다른 거래소의 USDT 기준 가격 계산
+                                  const otherUsdtPrice =
+                                    s.spot!.currency === "KRW"
+                                      ? (s.spot!.price /
+                                          exchangeRates.usd_krw) *
+                                        exchangeRates.usdt_usd
+                                      : s.spot!.currency === "USD"
+                                      ? s.spot!.price * exchangeRates.usdt_usd
+                                      : s.spot!.price;
+
+                                  // 차이% 계산
+                                  const diffPercent =
+                                    ((otherUsdtPrice - currentUsdtPrice) /
+                                      currentUsdtPrice) *
+                                    100;
+
+                                  return (
+                                    <Text key={s.exchange} size="xs">
+                                      <strong>{s.exchange}:</strong>{" "}
+                                      {formatPrice(otherUsdtPrice, "USDT")} (
+                                      {diffPercent > 0 ? "+" : ""}
+                                      {diffPercent.toFixed(2)}%)
+                                    </Text>
+                                  );
+                                })}
+                            </>
+                          );
+                        })()}
+                      </Stack>
+                    ) : (
+                      <Text size="xs">
+                        {snapshot.exchange}:{" "}
+                        {formatPrice(
+                          snapshot.spot.price,
+                          snapshot.spot.currency
+                        )}
+                      </Text>
+                    )
+                  }
+                >
+                  <Text fw={500} c="dimmed" style={{ cursor: "help" }}>
+                    {snapshot.spot.currency === "KRW" && exchangeRates
+                      ? formatPrice(
+                          snapshot.spot.price / exchangeRates.usd_krw,
+                          "USD"
+                        )
+                      : formatPrice(
+                          snapshot.spot.price,
+                          snapshot.spot.currency
+                        )}
+                  </Text>
+                </Tooltip>
+              ) : (
+                <Text c="dimmed">-</Text>
+              )}
+            </Table.Td>
+            <Table.Td style={{ width: "130px" }}>
+              {(() => {
+                // 빗썸의 현물 가격 찾기
+                const bithumbSpot = allSpotSnapshots.find(
+                  (s) =>
+                    s.symbol === snapshot.symbol &&
+                    s.exchange === "Bithumb" &&
+                    s.spot !== null
+                );
+
+                if (!bithumbSpot || !bithumbSpot.spot || !exchangeRates) {
+                  return <Text c="dimmed">-</Text>;
+                }
+
+                // 빗썸 가격을 USD로 변환
+                const bithumbUsdPrice =
+                  bithumbSpot.spot.currency === "KRW"
+                    ? bithumbSpot.spot.price / exchangeRates.usd_krw
+                    : bithumbSpot.spot.currency === "USD"
+                    ? bithumbSpot.spot.price
+                    : bithumbSpot.spot.price / exchangeRates.usdt_usd;
+
+                // 현재 코인의 현물 가격을 USDT 기준으로 USD로 변환
+                // (현물 가격을 USDT로 변환한 후 USD로 변환)
+                const currentUsdtPrice =
+                  snapshot.spot && snapshot.spot.currency === "KRW"
+                    ? (snapshot.spot.price / exchangeRates.usd_krw) *
+                      exchangeRates.usdt_usd
+                    : snapshot.spot && snapshot.spot.currency === "USD"
+                    ? snapshot.spot.price * exchangeRates.usdt_usd
+                    : snapshot.spot && snapshot.spot.currency === "USDT"
+                    ? snapshot.spot.price * exchangeRates.usdt_usd
+                    : null;
+
+                if (!currentUsdtPrice) {
+                  return <Text c="dimmed">-</Text>;
+                }
+
+                // 김프갭 계산: ((현재 USDT USD 가격 - 빗썸 USD 가격) / 빗썸 USD 가격) * 100
+                const kimchiGap =
+                  ((currentUsdtPrice - bithumbUsdPrice) / bithumbUsdPrice) *
+                  100;
+
+                return (
+                  <Badge
+                    color={getFundingRateColor(kimchiGap / 100)}
+                    variant="light"
+                  >
+                    {kimchiGap > 0 ? "+" : ""}
+                    {kimchiGap.toFixed(2)}%
+                  </Badge>
+                );
+              })()}
+            </Table.Td>
+          </>
         )}
         {hasSpotData && (
           <Table.Td style={{ width: "130px" }}>
-            {snapshot.spot ? (
+            {snapshot.spot && perp ? (
               <Badge
                 color={getFundingRateColor(
                   (perp.mark_price - snapshot.spot.price) / snapshot.spot.price
@@ -113,18 +290,37 @@ const TableRow = memo(
           </Table.Td>
         )}
         <Table.Td style={{ width: "130px" }}>
-          <Text fw={500}>{formatOI(perp.oi_usd)}M</Text>
+          {perp ? (
+            <Text fw={500}>{formatOI(perp.oi_usd)}M</Text>
+          ) : (
+            <Text c="dimmed">-</Text>
+          )}
         </Table.Td>
         <Table.Td style={{ width: "120px" }}>
-          <Text>${formatVol(perp.vol_24h_usd)}</Text>
+          {perp ? (
+            <Text>${formatVol(perp.vol_24h_usd)}</Text>
+          ) : (
+            <Text c="dimmed">-</Text>
+          )}
         </Table.Td>
         <Table.Td style={{ width: "130px" }}>
-          <Badge color={getFundingRateColor(perp.funding_rate)} variant="light">
-            {formatFundingRate(perp.funding_rate)}
-          </Badge>
+          {perp ? (
+            <Badge
+              color={getFundingRateColor(perp.funding_rate)}
+              variant="light"
+            >
+              {formatFundingRate(perp.funding_rate)}
+            </Badge>
+          ) : (
+            <Text c="dimmed">-</Text>
+          )}
         </Table.Td>
         <Table.Td style={{ width: "150px" }}>
-          <Text size="sm">{getTimeUntilFunding(perp.next_funding_time)}</Text>
+          {perp ? (
+            <Text size="sm">{getTimeUntilFunding(perp.next_funding_time)}</Text>
+          ) : (
+            <Text c="dimmed">-</Text>
+          )}
         </Table.Td>
         <Table.Td style={{ width: "120px" }}>
           <div
@@ -135,18 +331,20 @@ const TableRow = memo(
               alignItems: "center",
             }}
           >
-            <Button
-              component="a"
-              href={getExchangeUrl(snapshot.exchange, snapshot.symbol)}
-              target="_blank"
-              rel="noopener noreferrer"
-              size="xs"
-              variant="light"
-              p={4}
-              style={{ minWidth: "auto", width: "auto", height: "auto" }}
-            >
-              <IconChartLine size={16} />
-            </Button>
+            {perp && (
+              <Button
+                component="a"
+                href={getExchangeUrl(snapshot.exchange, snapshot.symbol)}
+                target="_blank"
+                rel="noopener noreferrer"
+                size="xs"
+                variant="light"
+                p={4}
+                style={{ minWidth: "auto", width: "auto", height: "auto" }}
+              >
+                <IconChartLine size={16} />
+              </Button>
+            )}
             {snapshot.spot && (
               <Button
                 component="a"
@@ -171,7 +369,7 @@ const TableRow = memo(
 
 TableRow.displayName = "TableRow";
 
-const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
+const SnapshotTable = ({ snapshots, exchangeRates }: SnapshotTableProps) => {
   const [sortField, setSortField] = useState<SortField>("funding_rate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const parentRef = useRef<HTMLDivElement>(null);
@@ -184,6 +382,17 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
       setSortDirection("desc");
     }
   };
+
+  // 모든 spot 데이터를 추출 (같은 심볼의 다른 거래소 현물 가격 표시용 및 정렬용)
+  const allSpotSnapshots = useMemo(() => {
+    return snapshots
+      .filter((s) => s.spot !== null)
+      .map((s) => ({
+        exchange: s.exchange,
+        symbol: s.symbol,
+        spot: s.spot,
+      }));
+  }, [snapshots]);
 
   const sortedSnapshots = useMemo(() => {
     const sorted = [...snapshots];
@@ -205,17 +414,94 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
           bValue = b.perp?.mark_price ?? 0;
           break;
         case "spot_price":
-          aValue = a.spot?.price ?? 0;
-          bValue = b.spot?.price ?? 0;
+          // KRW인 경우 USD로 변환해서 정렬
+          const aSpotPrice = a.spot?.price ?? 0;
+          const bSpotPrice = b.spot?.price ?? 0;
+          aValue =
+            a.spot?.currency === "KRW" && exchangeRates
+              ? aSpotPrice / exchangeRates.usd_krw
+              : aSpotPrice;
+          bValue =
+            b.spot?.currency === "KRW" && exchangeRates
+              ? bSpotPrice / exchangeRates.usd_krw
+              : bSpotPrice;
+          break;
+        case "kimchi_gap":
+          // 빗썸 현물 가격과의 차이 계산
+          const aBithumbSpot = allSpotSnapshots.find(
+            (s) =>
+              s.symbol === a.symbol &&
+              s.exchange === "Bithumb" &&
+              s.spot !== null
+          );
+          const bBithumbSpot = allSpotSnapshots.find(
+            (s) =>
+              s.symbol === b.symbol &&
+              s.exchange === "Bithumb" &&
+              s.spot !== null
+          );
+
+          if (!aBithumbSpot || !aBithumbSpot.spot || !exchangeRates) {
+            aValue = 0;
+          } else {
+            const aBithumbUsd =
+              aBithumbSpot.spot.currency === "KRW"
+                ? aBithumbSpot.spot.price / exchangeRates.usd_krw
+                : aBithumbSpot.spot.currency === "USD"
+                ? aBithumbSpot.spot.price
+                : aBithumbSpot.spot.price / exchangeRates.usdt_usd;
+            const aCurrentUsdt =
+              a.spot && a.spot.currency === "KRW"
+                ? (a.spot.price / exchangeRates.usd_krw) *
+                  exchangeRates.usdt_usd
+                : a.spot && a.spot.currency === "USD"
+                ? a.spot.price * exchangeRates.usdt_usd
+                : a.spot?.price ?? 0;
+            aValue =
+              aCurrentUsdt && aBithumbUsd
+                ? ((aCurrentUsdt - aBithumbUsd) / aBithumbUsd) * 100
+                : 0;
+          }
+
+          if (!bBithumbSpot || !bBithumbSpot.spot || !exchangeRates) {
+            bValue = 0;
+          } else {
+            const bBithumbUsd =
+              bBithumbSpot.spot.currency === "KRW"
+                ? bBithumbSpot.spot.price / exchangeRates.usd_krw
+                : bBithumbSpot.spot.currency === "USD"
+                ? bBithumbSpot.spot.price
+                : bBithumbSpot.spot.price / exchangeRates.usdt_usd;
+            const bCurrentUsdt =
+              b.spot && b.spot.currency === "KRW"
+                ? (b.spot.price / exchangeRates.usd_krw) *
+                  exchangeRates.usdt_usd
+                : b.spot && b.spot.currency === "USD"
+                ? b.spot.price * exchangeRates.usdt_usd
+                : b.spot?.price ?? 0;
+            bValue =
+              bCurrentUsdt && bBithumbUsd
+                ? ((bCurrentUsdt - bBithumbUsd) / bBithumbUsd) * 100
+                : 0;
+          }
           break;
         case "perp_spot_gap":
+          // spot 가격을 USD로 변환해서 갭 계산
+          const aSpotPriceForGap =
+            a.spot?.currency === "KRW" && exchangeRates
+              ? (a.spot.price ?? 0) / exchangeRates.usd_krw
+              : a.spot?.price ?? 0;
+          const bSpotPriceForGap =
+            b.spot?.currency === "KRW" && exchangeRates
+              ? (b.spot.price ?? 0) / exchangeRates.usd_krw
+              : b.spot?.price ?? 0;
           const aGap =
             a.perp && a.spot
-              ? (a.perp.mark_price - a.spot.price) / a.spot.price
+              ? (a.perp.mark_price - aSpotPriceForGap) / aSpotPriceForGap
               : 0;
           const bGap =
             b.perp && b.spot
-              ? (b.perp.mark_price - b.spot.price) / b.spot.price
+              ? (b.perp.mark_price - bSpotPriceForGap) / bSpotPriceForGap
               : 0;
           aValue = aGap;
           bValue = bGap;
@@ -251,7 +537,7 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
       }
     });
     return sorted;
-  }, [snapshots, sortField, sortDirection]);
+  }, [snapshots, sortField, sortDirection, exchangeRates]);
 
   // 포맷팅 함수들을 useCallback으로 메모이제이션
   const formatOI = useCallback((oi: number): string => {
@@ -272,6 +558,24 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
   const formatFundingRate = useCallback((rate: number): string => {
     return (rate * 100).toFixed(4) + "%";
   }, []);
+
+  const formatPrice = useCallback(
+    (price: number, currency: Currency): string => {
+      if (currency === "KRW") {
+        return `₩${price.toLocaleString("ko-KR", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        })}`;
+      } else {
+        // USD, USDT 모두 달러로 표시
+        return `$${price.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+      }
+    },
+    []
+  );
 
   const formatPerpSpotGap = useCallback(
     (perpPrice: number, spotPrice: number | null): string => {
@@ -335,6 +639,8 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
         return "gray";
       case "Bitget":
         return "cyan";
+      case "Bithumb":
+        return "blue";
       default:
         return "gray";
     }
@@ -379,6 +685,10 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
         return `https://www.okx.com/trade-spot/${baseSymbol}-usdt`;
       case "Bitget":
         return `https://www.bitget.com/spot/${symbol}`;
+      case "Bithumb":
+        // 빗썸은 심볼 형식이 다를 수 있음 (예: BTC_KRW)
+        const bithumbSymbol = symbol.replace("USDT", "KRW");
+        return `https://www.bithumb.com/trade/order/${bithumbSymbol}`;
       default:
         return "#";
     }
@@ -483,6 +793,14 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
               {hasSpotData && (
                 <Table.Th
                   style={{ cursor: "pointer", width: "130px" }}
+                  onClick={() => handleSort("kimchi_gap")}
+                >
+                  <Group gap={4}>김프 갭{getSortIcon("kimchi_gap")}</Group>
+                </Table.Th>
+              )}
+              {hasSpotData && (
+                <Table.Th
+                  style={{ cursor: "pointer", width: "130px" }}
                   onClick={() => handleSort("perp_spot_gap")}
                 >
                   <Group gap={4}>선현물 갭{getSortIcon("perp_spot_gap")}</Group>
@@ -533,7 +851,7 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
             {paddingTop > 0 && (
               <Table.Tr>
                 <Table.Td
-                  colSpan={hasSpotData ? 10 : 8}
+                  colSpan={hasSpotData ? 11 : 8}
                   style={{ height: `${paddingTop}px`, padding: 0 }}
                 />
               </Table.Tr>
@@ -548,6 +866,7 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
                   formatOI={formatOI}
                   formatVol={formatVol}
                   formatFundingRate={formatFundingRate}
+                  formatPrice={formatPrice}
                   formatPerpSpotGap={formatPerpSpotGap}
                   getTimeUntilFunding={getTimeUntilFunding}
                   getExchangeBadgeColor={getExchangeBadgeColor}
@@ -555,13 +874,15 @@ const SnapshotTable = ({ snapshots }: SnapshotTableProps) => {
                   getExchangeUrl={getExchangeUrl}
                   getSpotUrl={getSpotUrl}
                   hasSpotData={hasSpotData}
+                  exchangeRates={exchangeRates}
+                  allSpotSnapshots={allSpotSnapshots}
                 />
               );
             })}
             {paddingBottom > 0 && (
               <Table.Tr>
                 <Table.Td
-                  colSpan={hasSpotData ? 10 : 8}
+                  colSpan={hasSpotData ? 11 : 8}
                   style={{ height: `${paddingBottom}px`, padding: 0 }}
                 />
               </Table.Tr>

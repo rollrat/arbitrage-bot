@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::model::{ExchangeId, PerpSnapshot, SpotSnapshot};
+use crate::model::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 use super::{ExchangeError, PerpExchange, SpotExchange};
 
@@ -102,6 +102,7 @@ impl PerpExchange for BybitClient {
             out.push(PerpSnapshot {
                 exchange: ExchangeId::Bybit,
                 symbol: ticker.symbol,
+                currency: Currency::USDT,
                 mark_price,
                 oi_usd,
                 vol_24h_usd,
@@ -193,6 +194,7 @@ impl SpotExchange for BybitSpotClient {
             out.push(SpotSnapshot {
                 exchange: ExchangeId::Bybit,
                 symbol: ticker.symbol,
+                currency: Currency::USDT,
                 price,
                 vol_24h_usd,
                 updated_at: now,

@@ -6,7 +6,7 @@ use futures::stream::{self, StreamExt};
 use serde::Deserialize;
 use tracing;
 
-use crate::model::{ExchangeId, PerpSnapshot, SpotSnapshot};
+use crate::model::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 use super::{ExchangeError, PerpExchange, SpotExchange};
 
@@ -241,6 +241,7 @@ impl PerpExchange for BitgetClient {
             out.push(PerpSnapshot {
                 exchange: ExchangeId::Bitget,
                 symbol,
+                currency: Currency::USDT,
                 mark_price,
                 oi_usd,
                 vol_24h_usd,
@@ -318,6 +319,7 @@ impl SpotExchange for BitgetSpotClient {
             out.push(SpotSnapshot {
                 exchange: ExchangeId::Bitget,
                 symbol: ticker.symbol,
+                currency: Currency::USDT,
                 price,
                 vol_24h_usd,
                 updated_at: now,

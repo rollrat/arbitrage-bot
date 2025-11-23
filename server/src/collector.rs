@@ -4,6 +4,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::exchange::{PerpExchange, SpotExchange};
+use crate::exchange_rate::fetch_all_exchange_rates;
 use crate::model::{ExchangeId, PerpData, PerpSnapshot, SpotData, SpotSnapshot, UnifiedSnapshot};
 use crate::server::AppState;
 
@@ -71,6 +72,9 @@ pub fn start_collect_loop(
                 *guard = all_spot;
             }
 
+            // 환율 정보 가져오기
+            let exchange_rates = fetch_all_exchange_rates().await;
+
             // 통합 스냅샷 생성
             let mut unified_map: HashMap<(ExchangeId, String), UnifiedSnapshot> = HashMap::new();
 
@@ -80,18 +84,23 @@ pub fn start_collect_loop(
                 let unified = unified_map.entry(key).or_insert_with(|| UnifiedSnapshot {
                     exchange: perp.exchange,
                     symbol: perp.symbol.clone(),
+                    currency: perp.currency,
                     perp: None,
                     spot: None,
+                    exchange_rates: exchange_rates.clone(),
                     updated_at: perp.updated_at,
                 });
                 unified.perp = Some(PerpData {
+                    currency: perp.currency,
                     mark_price: perp.mark_price,
                     oi_usd: perp.oi_usd,
                     vol_24h_usd: perp.vol_24h_usd,
                     funding_rate: perp.funding_rate,
                     next_funding_time: perp.next_funding_time,
                 });
-                // updated_at은 더 최신 것으로 업데이트
+                // currency와 updated_at은 더 최신 것으로 업데이트
+                unified.currency = perp.currency;
+                unified.exchange_rates = exchange_rates.clone();
                 if perp.updated_at > unified.updated_at {
                     unified.updated_at = perp.updated_at;
                 }
@@ -103,15 +112,22 @@ pub fn start_collect_loop(
                 let unified = unified_map.entry(key).or_insert_with(|| UnifiedSnapshot {
                     exchange: spot.exchange,
                     symbol: spot.symbol.clone(),
+                    currency: spot.currency,
                     perp: None,
                     spot: None,
+                    exchange_rates: exchange_rates.clone(),
                     updated_at: spot.updated_at,
                 });
                 unified.spot = Some(SpotData {
+                    currency: spot.currency,
                     price: spot.price,
                     vol_24h_usd: spot.vol_24h_usd,
                 });
-                // updated_at은 더 최신 것으로 업데이트
+                // currency와 updated_at은 더 최신 것으로 업데이트 (현물이 없으면 현물 currency 사용)
+                if unified.perp.is_none() {
+                    unified.currency = spot.currency;
+                }
+                unified.exchange_rates = exchange_rates.clone();
                 if spot.updated_at > unified.updated_at {
                     unified.updated_at = spot.updated_at;
                 }
