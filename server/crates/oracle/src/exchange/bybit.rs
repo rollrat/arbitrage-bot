@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::model::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
+use interface::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 use super::{ExchangeError, PerpExchange, SpotExchange};
 

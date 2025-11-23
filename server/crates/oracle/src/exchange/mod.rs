@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::model::{ExchangeId, PerpSnapshot, SpotSnapshot};
+use interface::{ExchangeId, PerpSnapshot, SpotSnapshot};
 
 pub mod binance;
 pub mod bitget;

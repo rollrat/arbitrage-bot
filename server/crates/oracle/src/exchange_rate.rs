@@ -3,7 +3,7 @@ use eyre::Result;
 use serde::Deserialize;
 use tracing::info;
 
-use crate::model::ExchangeRates;
+use interface::ExchangeRates;
 
 const EXCHANGE_RATE_API_URL: &str = "https://api.exchangerate-api.com/v4/latest/USD";
 const BITHUMB_API_URL: &str = "https://api.bithumb.com/public/ticker/USDT_KRW";

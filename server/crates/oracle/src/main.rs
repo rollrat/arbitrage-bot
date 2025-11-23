@@ -4,17 +4,11 @@ use color_eyre::eyre;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
-mod collector;
-mod exchange;
-mod exchange_rate;
-mod model;
-mod server;
-
-use crate::exchange::{
+use oracle::exchange::{
     BinanceClient, BinanceSpotClient, BitgetClient, BitgetSpotClient, BithumbSpotClient,
     BybitClient, BybitSpotClient, OkxClient, OkxSpotClient, PerpExchange, SpotExchange,
 };
-use crate::server::AppState;
+use oracle::server::AppState;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -46,7 +40,7 @@ async fn main() -> eyre::Result<()> {
     ];
 
     // start background collector
-    collector::start_collect_loop(
+    oracle::collector::start_collect_loop(
         perp_exchanges,
         spot_exchanges,
         state.clone(),
@@ -54,7 +48,7 @@ async fn main() -> eyre::Result<()> {
     );
 
     // start HTTP server on 8080
-    server::serve(state, 12090).await?;
+    oracle::server::serve(state, 12090).await?;
 
     Ok(())
 }

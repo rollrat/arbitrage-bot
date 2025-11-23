@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::model::{PerpSnapshot, SpotSnapshot, UnifiedSnapshot};
+use interface::{PerpSnapshot, SpotSnapshot, UnifiedSnapshot};
 
 #[derive(Clone)]
 pub struct AppState {

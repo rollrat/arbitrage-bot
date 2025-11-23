@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::model::{Currency, ExchangeId, SpotSnapshot};
+use interface::{Currency, ExchangeId, SpotSnapshot};
 
 use super::{ExchangeError, SpotExchange};
 

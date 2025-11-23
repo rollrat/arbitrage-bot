@@ -6,7 +6,7 @@ use futures::stream::{self, StreamExt};
 use serde::Deserialize;
 use tracing;
 
-use crate::model::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
+use interface::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 use super::{ExchangeError, PerpExchange, SpotExchange};
 

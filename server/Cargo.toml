@@ -1,9 +1,8 @@
-[package]
-name = "perp-scanner-server"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["crates/oracle", "crates/interface"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 futures = "0.3"

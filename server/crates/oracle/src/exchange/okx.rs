@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::sync::RwLock;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::model::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
+use interface::{Currency, ExchangeId, PerpSnapshot, SpotSnapshot};
 
 use super::{ExchangeError, PerpExchange, SpotExchange};
 

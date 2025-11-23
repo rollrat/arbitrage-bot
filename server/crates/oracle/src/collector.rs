@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use crate::exchange::{PerpExchange, SpotExchange};
 use crate::exchange_rate::fetch_all_exchange_rates;
-use crate::model::{ExchangeId, PerpData, PerpSnapshot, SpotData, SpotSnapshot, UnifiedSnapshot};
+use interface::{ExchangeId, PerpData, PerpSnapshot, SpotData, SpotSnapshot, UnifiedSnapshot};
 use crate::server::AppState;
 
 pub fn start_collect_loop(
