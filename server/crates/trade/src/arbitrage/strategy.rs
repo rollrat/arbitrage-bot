@@ -42,6 +42,7 @@ pub enum LegExecutionPolicy {
     PostOnlyMaker,
 }
 
+use interface::ExchangeId;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,4 +113,67 @@ impl Default for StrategyParams {
     }
 }
 
+pub mod cross_basis;
 pub mod intra_basis;
+
+#[derive(Debug, Clone)]
+pub struct CrossStrategyParams {
+    /// 프리미엄 거래소(spot) 심볼 (예: "BTCKRW")
+    pub primary_symbol: String,
+    /// 헤지 거래소(선물) 심볼 (예: "BTCUSDT")
+    pub hedge_symbol: String,
+    /// 프리미엄 거래소 ID
+    pub primary_exchange: ExchangeId,
+    /// 헤지 거래소 ID
+    pub hedge_exchange: ExchangeId,
+    /// 프리미엄 거래소 spot 포지션 기준 모드 (carry/reverse/auto)
+    pub mode: StrategyMode,
+    /// 진입 임계값 (basis points)
+    pub entry_bps: f64,
+    /// 청산 임계값 (basis points)
+    pub exit_bps: f64,
+    /// 프리미엄 거래소에서 사용할 명목가 (현지 통화 단위)
+    pub primary_notional: f64,
+    /// 헤지 거래소에서 사용할 명목가 (USDT 등)
+    pub hedge_notional: f64,
+    /// 헤지 선물 레버리지
+    pub leverage: u32,
+    /// 헤지 선물 마진 타입 (true = 격리)
+    pub isolated: bool,
+    /// 테스트 모드 여부
+    pub dry_run: bool,
+    /// 양쪽 레그 실행 정책
+    pub policy: ExecutionPolicy,
+    /// 프리미엄 거래소 spot 주문 정책
+    pub spot_leg: LegExecutionPolicy,
+    /// 헤지 거래소 선물 주문 정책
+    pub futures_leg: LegExecutionPolicy,
+    /// 프리미엄 가격을 헤지 통화 기준으로 환산하기 위한 계수 (예: KRW->USDT)
+    pub fx_adjustment: f64,
+    /// 프리미엄 거래소에서 보유해야 하는 베이스 자산명 (예: "BTC")
+    pub primary_base_asset: String,
+}
+
+impl Default for CrossStrategyParams {
+    fn default() -> Self {
+        Self {
+            primary_symbol: "BTCKRW".to_string(),
+            hedge_symbol: "BTCUSDT".to_string(),
+            primary_exchange: ExchangeId::Bithumb,
+            hedge_exchange: ExchangeId::Binance,
+            mode: StrategyMode::Carry,
+            entry_bps: 50.0,
+            exit_bps: 5.0,
+            primary_notional: 5_000_000.0, // KRW 단위 예시
+            hedge_notional: 5_000.0,       // USDT 단위 예시
+            leverage: 1,
+            isolated: false,
+            dry_run: true,
+            policy: ExecutionPolicy::TakerTaker,
+            spot_leg: LegExecutionPolicy::MarketTaker,
+            futures_leg: LegExecutionPolicy::MarketTaker,
+            fx_adjustment: 1.0,
+            primary_base_asset: "BTC".to_string(),
+        }
+    }
+}

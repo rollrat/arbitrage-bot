@@ -18,3 +18,4 @@ fn setup() {
 
 pub mod arbitrage;
 pub mod explore;
+pub mod trader;

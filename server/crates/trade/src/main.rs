@@ -5,7 +5,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 mod explore;
 
-use trade::arbitrage::{BasisArbitrageStrategy, StrategyParams};
+use trade::arbitrage::{IntraBasisArbitrageStrategy, StrategyParams};
 
 // lib.rs에서 자동으로 dotenv가 로드됨
 
@@ -82,8 +82,8 @@ async fn run_arbitrage_test() -> eyre::Result<()> {
     info!("  Isolated: {}", params.isolated);
     info!("  Dry Run: {}", params.dry_run);
 
-    let strategy =
-        BasisArbitrageStrategy::new(params).map_err(|e| eyre::eyre!("전략 초기화 실패: {}", e))?;
+    let strategy = IntraBasisArbitrageStrategy::new(params)
+        .map_err(|e| eyre::eyre!("전략 초기화 실패: {}", e))?;
 
     info!("전략이 성공적으로 초기화되었습니다.");
 

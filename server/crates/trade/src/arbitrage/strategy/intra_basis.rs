@@ -2,18 +2,97 @@ use interface::ExchangeError;
 use serde_json;
 use tracing::{info, warn};
 
-use super::super::{
-    binance_trader::{BinanceTrader, OrderResponse},
-    state::ArbitrageState,
-};
+use super::super::super::trader::{BinanceTrader, OrderResponse};
+use super::super::state::ArbitrageState;
 use super::{StrategyMode, StrategyParams};
 
-pub struct BasisArbitrageStrategy {
+/// 단일 거래소(Binance) 안에서 스팟/선물 간 베이시스(가격 격차)를 이용해
+/// 델타-뉴트럴 포지션을 자동으로 관리하는 인트라(intra) 베이시스 아비트라지 전략.
+///
+/// 구조적으로는 CrossBasisArbitrageStrategy 와 매우 비슷하지만,
+/// - 모든 주문/포지션/마진/청산이 **하나의 거래소·하나의 계정** 안에서 일어나고
+/// - FX(원화/김프, USDT 프리미엄 등)나 거래소 간 전송/규제 리스크가 없다는 점에서
+///   훨씬 단순한 형태의 베이시스 캐리/리버스 전략을 구현한다.
+///
+/// 핵심 역할:
+/// - `trader: BinanceTrader`
+///   - Binance 현물(spot) + 선물(futures) API 를 둘 다 다루는 공용 트레이더.
+///   - 스팟/선물 exchangeInfo 로부터 LOT_SIZE/stepSize 등을 읽어와 수량을 clamp 하고,
+///     스팟/선물 주문, 잔고 조회, 마크 가격 조회 등을 담당.
+/// - `params: StrategyParams`
+///   - 대상 심볼(symbol), 진입/청산 기준 bps(entry_bps/exit_bps),
+///     명목가(notional), 레버리지(leverage), 마진 모드(isolated), 전략 모드(mode),
+///     dry_run 여부 등을 포함하는 런타임 설정값.
+///
+/// 전략 개념:
+/// - 한 거래소 안에서 **spot vs futures** 베이시스를 보고,
+///   - 선물이 스팟보다 충분히 비싸면 → 캐리(CARRY) 포지션
+///   - 선물이 스팟보다 충분히 싸면 → 리버스(REVERSE) 포지션
+///   에 진입한 뒤, 베이시스가 다시 좁혀지면 청산하는 **mean-reversion 전략**.
+/// - 모든 것이 같은 기축(USDT) 기준이기 때문에,
+///   CrossBasis 와 달리 fx_adjustment, cross 계정 재고, 출금/전송 리스크를
+///   따로 고려할 필요가 없다.
+///
+/// 포지션 구조:
+/// - CARRY (선물 프리미엄을 먹는 방향)
+///   - 진입: `open_carry()`
+///     - 스팟: symbol **BUY**
+///     - 선물: symbol **SELL**
+///     - 스팟 롱 + 선물 숏 → 가격 방향(델타)은 중립에 가깝고,
+///       베이시스 축소 및 펀딩 구조를 수익원으로 본다.
+///   - 청산: `close_carry()`
+///     - 선물: **BUY reduce-only** 로 숏 포지션 해소
+///     - 스팟: **SELL** 로 롱 포지션 해소
+///
+/// - REVERSE (선물 디스카운트를 먹는 방향, 보유 스팟을 활용)
+///   - 진입: `open_reverse()`
+///     - 스팟: 보유 중인 base 자산(free balance) 한도 내에서 **SELL**
+///       (공매도는 하지 않고, inventory-based short 만 허용)
+///     - 선물: symbol **BUY**
+///     - 스팟 숏(보유분) + 선물 롱 → 마찬가지로 델타는 중립에 가까우며,
+///       디스카운트 축소 및 펀딩 구조에 베팅.
+///   - 청산: `close_reverse()`
+///     - 선물: **SELL reduce-only** 로 롱 포지션 해소
+///     - 스팟: **BUY** 로 초기 매도분을 다시 매수
+///
+/// 주요 메서드:
+/// - `compute_basis_bps(spot_price, futures_mark)`
+///   - basis_bps = (futures_mark - spot_price) / spot_price * 10_000
+///   - 양수(+)면 선물 프리미엄, 음수(-)면 선물 디스카운트 상태를 의미.
+/// - `size_from_notional(spot_price)`
+///   - params.notional(USDT 기준 명목가)을 spot_price 로 나누어 기준 수량을 계산하고,
+///     거래소 LOT_SIZE 규칙에 맞게 clamp 한 최종 주문 수량을 리턴.
+/// - `open_carry` / `close_carry`
+///   - CARRY 포지션의 진입/청산을 담당.
+///   - 스팟/선물 각각의 clamp 결과 중 더 작은 수량을 사용해
+///     델타를 최대한 중립에 맞춘다.
+/// - `open_reverse` / `close_reverse`
+///   - REVERSE 포지션의 진입/청산을 담당.
+///   - 스팟은 **현재 보유 중인 base 자산(free balance)** 한도 내에서만 매도하며,
+///     선물 레그와의 clamp 결과를 다시 최소값으로 맞춰 델타를 줄인다.
+///
+/// 메인 루프(`run_loop`):
+/// - 1초 간격으로 spot / futures mark 가격을 조회하고,
+///   `compute_basis_bps` 로 베이시스를 계산한다.
+/// - ArbitrageState 를 파일로 읽고/쓰면서,
+///   - 현재 포지션 유무(open),
+///   - 방향(dir = "carry"/"reverse"),
+///   - 수량(qty),
+///   - 진입/청산 시점의 basis_bps,
+///   - 마지막 주문 응답(actions: {spot, futures})
+///   를 지속적으로 기록한다.
+/// - 포지션이 없을 때:
+///   - StrategyMode::Carry / Reverse / Auto 에 따라
+///     entry_bps 초과/미만 조건을 만족하면 `open_carry` 또는 `open_reverse` 호출.
+/// - 포지션이 있을 때:
+///   - dir 에 따라 exit_bps 조건(basis_bps <= exit_bps, 또는 >= -exit_bps)을 체크하고
+///     `close_carry` / `close_reverse` 를 호출해 포지션을 닫는다.
+pub struct IntraBasisArbitrageStrategy {
     trader: BinanceTrader,
     params: StrategyParams,
 }
 
-impl BasisArbitrageStrategy {
+impl IntraBasisArbitrageStrategy {
     pub fn new(params: StrategyParams) -> Result<Self, ExchangeError> {
         let trader = BinanceTrader::new()?;
         Ok(Self { trader, params })
