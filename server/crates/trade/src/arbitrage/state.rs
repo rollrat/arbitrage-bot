@@ -4,13 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+use crate::trader::binance::HedgedPair;
+
 const STATE_FILE: &str = "arb_state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArbitrageState {
     pub open: bool,
     pub dir: Option<String>, // "carry" or "reverse"
-    pub qty: f64,
+    pub pair: HedgedPair,
     pub symbol: String,
     pub last_open_basis_bps: Option<f64>,
     pub last_close_basis_bps: Option<f64>,
@@ -23,7 +25,7 @@ impl Default for ArbitrageState {
         Self {
             open: false,
             dir: None,
-            qty: 0.0,
+            pair: HedgedPair::default(),
             symbol: "BTCUSDT".to_string(),
             last_open_basis_bps: None,
             last_close_basis_bps: None,
@@ -69,13 +71,13 @@ impl ArbitrageState {
         &mut self,
         open: bool,
         dir: Option<String>,
-        qty: f64,
+        pair: HedgedPair,
         basis_bps: Option<f64>,
         actions: Option<serde_json::Value>,
     ) {
         self.open = open;
         self.dir = dir.clone();
-        self.qty = qty;
+        self.pair = pair;
         self.updated_at = Utc::now();
 
         if open {

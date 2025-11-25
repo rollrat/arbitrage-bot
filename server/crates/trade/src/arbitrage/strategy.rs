@@ -98,11 +98,11 @@ pub struct StrategyParams {
 impl Default for StrategyParams {
     fn default() -> Self {
         Self {
-            symbol: "BTCUSDT".to_string(),
+            symbol: "XPLUSDT".to_string(),
             mode: StrategyMode::Carry,
             entry_bps: 2.0,
             exit_bps: 0.2,
-            notional: 100.0,
+            notional: 6.0,
             leverage: 1,
             isolated: false,
             dry_run: false,

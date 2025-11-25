@@ -361,8 +361,8 @@ where
                 if should_close {
                     info!("Exit condition met. Closing position...");
                     let result = match state.dir.as_deref() {
-                        Some("carry") => self.close_carry(state.qty).await,
-                        Some("reverse") => self.close_reverse(state.qty).await,
+                        Some("carry") => self.close_carry(todo!()).await,
+                        Some("reverse") => self.close_reverse(todo!()).await,
                         _ => {
                             warn!("Unknown position direction: {:?}", state.dir);
                             continue;
@@ -375,7 +375,13 @@ where
                                 "hedge": hedge_order,
                                 "spot": spot_order,
                             });
-                            state.update_position(false, None, 0.0, Some(basis_bps), Some(actions));
+                            state.update_position(
+                                false,
+                                None,
+                                Default::default(),
+                                Some(basis_bps),
+                                Some(actions),
+                            );
                             state.write()?;
                             info!("Position closed successfully");
                         }
@@ -414,7 +420,7 @@ where
                             state.update_position(
                                 true,
                                 Some("carry".to_string()),
-                                filled_qty,
+                                todo!(),
                                 Some(basis_bps),
                                 Some(actions),
                             );
@@ -436,7 +442,7 @@ where
                             state.update_position(
                                 true,
                                 Some("reverse".to_string()),
-                                filled_qty,
+                                todo!(),
                                 Some(basis_bps),
                                 Some(actions),
                             );

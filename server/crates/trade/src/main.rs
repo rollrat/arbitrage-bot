@@ -1,4 +1,5 @@
 use color_eyre::eyre;
+use exchanges::BinanceClient;
 use structopt::StructOpt;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -52,6 +53,10 @@ async fn run_bot() -> eyre::Result<()> {
 
 /// Oracle 서버 및 거래소 데이터 조회 테스트
 async fn run_explore_test() -> eyre::Result<()> {
+    let binance = BinanceClient::with_credentials()?;
+    let fee = binance.get_trade_fee_for_symbol("XPLUSDT").await?;
+    println!("fee: {:?}", fee);
+
     info!("\n=== Bithumb 자산 정보 조회 중... ===");
     let assets = explore::fetch_bithumb_assets().await?;
     explore::print_assets(&assets);
@@ -70,7 +75,7 @@ async fn run_arbitrage_test() -> eyre::Result<()> {
     info!("베이시스 아비트라지 전략 테스트 시작 (dry-run 모드)...");
 
     let mut params = StrategyParams::default();
-    params.dry_run = true;
+    params.dry_run = false;
 
     info!("테스트 파라미터:");
     info!("  Symbol: {}", params.symbol);

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::RwLock;
+use tracing::info;
 
 use exchanges::{AssetExchange, BinanceClient};
 use interface::ExchangeError;
@@ -102,12 +103,24 @@ pub struct LotSizeFilter {
 }
 
 pub struct BinanceTrader {
-    spot_client: BinanceClient,
-    futures_client: BinanceClient,
+    pub spot_client: BinanceClient,
+    pub futures_client: BinanceClient,
     /// 스팟 심볼별 LOT_SIZE 필터 캐시
     spot_lot_size_cache: RwLock<HashMap<String, LotSizeFilter>>,
     /// 선물 심볼별 LOT_SIZE 필터 캐시
     futures_lot_size_cache: RwLock<HashMap<String, LotSizeFilter>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct HedgedPair {
+    /// 스팟 주문에 실제로 넣을 수량 (LOT_SIZE 만족)
+    pub spot_order_qty: f64,
+    /// 선물 주문에 실제로 넣을 수량 (LOT_SIZE 만족)
+    pub fut_order_qty: f64,
+    /// 수수료 반영 후 예상 스팟 순수량
+    pub spot_net_qty_est: f64,
+    /// 예상 잔여 델타 (spot_net - fut)
+    pub delta_est: f64,
 }
 
 impl BinanceTrader {
@@ -298,27 +311,57 @@ impl BinanceTrader {
     }
 
     /// LOT_SIZE 필터를 사용하여 수량을 clamp하는 헬퍼 함수
+    // fn clamp_quantity_with_filter(filter: LotSizeFilter, qty: f64) -> f64 {
+    //     if qty <= 0.0 {
+    //         return 0.0;
+    //     }
+
+    //     let step = filter.step_size;
+    //     if step <= 0.0 {
+    //         return qty;
+    //     }
+
+    //     // step 단위로 내림
+    //     let steps = (qty / step).floor();
+    //     let clamped = steps * step;
+
+    //     if clamped < filter.min_qty {
+    //         0.0
+    //     } else if clamped > filter.max_qty {
+    //         filter.max_qty
+    //     } else {
+    //         clamped
+    //     }
+    // }
+
     fn clamp_quantity_with_filter(filter: LotSizeFilter, qty: f64) -> f64 {
+        const BASE_PRECISION: u32 = 8;
+
         if qty <= 0.0 {
             return 0.0;
         }
 
-        let step = filter.step_size;
-        if step <= 0.0 {
-            return qty;
+        // 1) precision 잘라내기 (floor)
+        let pow = 10f64.powi(BASE_PRECISION as i32);
+        let mut qty = (qty * pow).floor() / pow;
+
+        // 2) stepSize 처리
+        if filter.step_size > 0.0 {
+            let steps = (qty / filter.step_size).floor();
+            qty = steps * filter.step_size;
         }
 
-        // step 단위로 내림
-        let steps = (qty / step).floor();
-        let clamped = steps * step;
-
-        if clamped < filter.min_qty {
-            0.0
-        } else if clamped > filter.max_qty {
-            filter.max_qty
-        } else {
-            clamped
+        // 3) minQty 미만이면 invalid → 0이 아니라 "그냥 에러"로 처리해야 맞음
+        if qty < filter.min_qty {
+            return 0.0; // ← but ideally, return Err(...)
         }
+
+        // 4) maxQty clamp
+        if qty > filter.max_qty {
+            qty = filter.max_qty;
+        }
+
+        qty
     }
 
     /// 스팟 잔고 조회
@@ -442,6 +485,93 @@ impl BinanceTrader {
         }
     }
 
+    /// target_net_qty 근처에서 스팟/선물 둘 다 LOT_SIZE를 만족하는 쌍을 찾는다.
+    /// spot_fee_rate: 스팟 수수료율 (maker 또는 taker 중 선택)
+    pub fn find_hedged_pair(
+        &self,
+        symbol: &str,
+        target_net_qty: f64,
+        spot_fee_rate: f64,
+    ) -> Option<HedgedPair> {
+        if target_net_qty <= 0.0 {
+            return None;
+        }
+
+        // 선물 LOT_SIZE filter에서 stepSize를 가져와서 "한 스텝씩 줄여가며 탐색"에 사용
+        let fut_lot = self.get_futures_lot_size(symbol)?;
+        let fut_step = if fut_lot.step_size > 0.0 {
+            fut_lot.step_size
+        } else {
+            // stepSize가 0이면 격자 정보가 없으니 그냥 한 번만 시도
+            0.0
+        };
+
+        // 1) 먼저 target_net_qty를 기준으로 "선물 수량 후보"를 만든다.
+        //    (선물 LOT_SIZE에 맞게 클램프)
+        let mut fut_candidate = self.clamp_futures_quantity(symbol, target_net_qty);
+        if fut_candidate <= 0.0 {
+            return None;
+        }
+
+        // 허용 오차: 스팟/선물 스텝 중 더 작은 값의 절반 정도
+        let spot_step = self
+            .get_spot_lot_size(symbol)
+            .map(|f| f.step_size)
+            .unwrap_or(fut_step.max(1e-8)); // 그래도 0은 피하기
+
+        let tol = spot_step.min(fut_step.max(spot_step)).abs() * 0.5;
+
+        // 2) fut_candidate를 기준으로, 이에 맞는 스팟 주문 수량을 찾는다.
+        //    안 맞으면 선물 수량을 한 step씩 줄여가며 재시도.
+        let max_iters = 50;
+        for _ in 0..max_iters {
+            // 이 선물 수량을 "정확히" 덮고 싶다면, 스팟 순수량 == fut_candidate 여야 함.
+            // spot_net = spot_order * (1 - fee) ⇒ spot_order = fut_candidate / (1 - fee)
+            let ideal_spot_order = fut_candidate / (1.0 - spot_fee_rate);
+
+            if !ideal_spot_order.is_finite() || ideal_spot_order <= 0.0 {
+                break;
+            }
+
+            // 스팟 LOT_SIZE에 맞게 주문 수량 클램프
+            let spot_order_qty = self.clamp_spot_quantity(symbol, ideal_spot_order);
+            if spot_order_qty <= 0.0 {
+                break;
+            }
+
+            // 클램프 후 "예상 스팟 순수량"
+            let spot_net_qty_est = spot_order_qty * (1.0 - spot_fee_rate);
+
+            // 이 조합에서의 예상 델타
+            let delta = spot_net_qty_est - fut_candidate;
+
+            // 델타가 허용 오차 내면 이 쌍을 채택
+            if delta.abs() <= tol {
+                return Some(HedgedPair {
+                    spot_order_qty,
+                    fut_order_qty: fut_candidate,
+                    spot_net_qty_est,
+                    delta_est: delta,
+                });
+            }
+
+            // 더 안 맞으면 선물 수량을 한 step 줄여서 다시 시도
+            if fut_step <= 0.0 {
+                // step 정보가 없으면 더 이상 줄일 수 없음
+                break;
+            }
+
+            let next_fut = fut_candidate - fut_step;
+            let next_fut = self.clamp_futures_quantity(symbol, next_fut);
+            if next_fut <= 0.0 || (next_fut - fut_candidate).abs() < 1e-12 {
+                break;
+            }
+            fut_candidate = next_fut;
+        }
+
+        None
+    }
+
     /// 레거시 호환성을 위한 정적 메서드 (deprecated)
     /// 실제로는 clamp_spot_quantity 또는 clamp_futures_quantity를 사용해야 함
     #[deprecated(note = "Use clamp_spot_quantity or clamp_futures_quantity instead")]
@@ -483,6 +613,7 @@ impl BinanceTrader {
             "symbol={}&side={}&type=MARKET&quantity={}&timestamp={}",
             symbol, side, qty_str, timestamp
         );
+        info!("place_spot_order query_string: {}", query_string);
         let signature = exchanges::binance::generate_signature(&query_string, api_secret);
 
         let url = format!(
@@ -543,6 +674,8 @@ impl BinanceTrader {
             "symbol={}&side={}&type=MARKET&quantity={}&timestamp={}",
             symbol, side, qty_str, timestamp
         );
+
+        info!("place_futures_order query_string: {}", query_string);
 
         if reduce_only {
             query_string.push_str("&reduceOnly=true");

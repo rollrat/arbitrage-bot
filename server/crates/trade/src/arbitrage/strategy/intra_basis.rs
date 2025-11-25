@@ -4,6 +4,7 @@ use tracing::{info, warn};
 
 use super::super::state::ArbitrageState;
 use super::{StrategyMode, StrategyParams};
+use crate::trader::binance::HedgedPair;
 use crate::trader::{BinanceTrader, OrderResponse};
 
 /// 단일 거래소(Binance) 안에서 스팟/선물 간 베이시스(가격 격차)를 이용해
@@ -117,74 +118,98 @@ impl IntraBasisArbitrageStrategy {
     pub async fn open_carry(
         &self,
         qty: f64,
-    ) -> Result<(OrderResponse, OrderResponse), ExchangeError> {
+    ) -> Result<(OrderResponse, OrderResponse, HedgedPair), ExchangeError> {
         info!(
             "Opening CARRY position: spot BUY {} {}, futures SELL {} {}",
             qty, self.params.symbol, qty, self.params.symbol
         );
 
+        let fee = self
+            .trader
+            .spot_client
+            .get_trade_fee_for_symbol(&self.params.symbol)
+            .await?;
+
+        let spot_fee_rate = match self.params.mode {
+            StrategyMode::Carry => fee.taker,
+            _ => fee.maker,
+        };
+
+        // 스팟과 선물의 수량을 각각 clamp하고, 더 작은 쪽 사용
+        let pair = self
+            .trader
+            .find_hedged_pair(&self.params.symbol, qty, spot_fee_rate)
+            .ok_or_else(|| ExchangeError::Other("Failed to find hedged pair".into()))?;
+
         if self.params.dry_run {
+            info!("DRY RUN: pair: {:?}", pair);
             info!("DRY RUN: spot BUY {} {}", qty, self.params.symbol);
             info!("DRY RUN: futures SELL {} {}", qty, self.params.symbol);
             return Err(ExchangeError::Other("Dry run mode".to_string()));
         }
 
-        // 스팟과 선물의 수량을 각각 clamp하고, 더 작은 쪽 사용
-        let spot_qty = self.trader.clamp_spot_quantity(&self.params.symbol, qty);
-        let fut_qty = self.trader.clamp_futures_quantity(&self.params.symbol, qty);
-        let use_qty = spot_qty.min(fut_qty);
-
-        if use_qty <= 0.0 {
+        if pair.spot_net_qty_est <= 0.0 {
             return Err(ExchangeError::Other(format!(
                 "Quantity too small after clamping. Increase notional. spot_qty={}, fut_qty={}",
-                spot_qty, fut_qty
+                pair.spot_order_qty, pair.fut_order_qty
             )));
         }
 
         // 스팟 매수
         let spot_order = self
             .trader
-            .place_spot_order(&self.params.symbol, "BUY", use_qty, false)
+            .place_spot_order(&self.params.symbol, "BUY", pair.spot_order_qty, false)
             .await?;
 
         // 선물 숏
         let futures_order = self
             .trader
-            .place_futures_order(&self.params.symbol, "SELL", use_qty, false)
+            .place_futures_order(&self.params.symbol, "SELL", pair.fut_order_qty, false)
             .await?;
 
-        Ok((spot_order, futures_order))
+        // TODO: 선물 실패 처리, 트랜잭션
+
+        // TODO: delta_est 어떻게 처리할 지 고민하기
+
+        Ok((spot_order, futures_order, pair))
     }
 
     /// Carry 포지션 클로즈: 스팟 매도 + 선물 매수 (reduceOnly)
     pub async fn close_carry(
         &self,
-        qty: f64,
+        pair: HedgedPair,
     ) -> Result<(OrderResponse, OrderResponse), ExchangeError> {
         info!(
             "Closing CARRY position: spot SELL {} {}, futures BUY {} {} (reduceOnly)",
-            qty, self.params.symbol, qty, self.params.symbol
+            pair.spot_order_qty, self.params.symbol, pair.fut_order_qty, self.params.symbol
         );
 
         if self.params.dry_run {
             info!(
                 "DRY RUN: futures BUY {} {} (reduceOnly)",
-                qty, self.params.symbol
+                pair.fut_order_qty, self.params.symbol
             );
-            info!("DRY RUN: spot SELL {} {}", qty, self.params.symbol);
+            info!(
+                "DRY RUN: spot SELL {} {}",
+                pair.spot_order_qty, self.params.symbol
+            );
             return Err(ExchangeError::Other("Dry run mode".to_string()));
         }
 
-        // 선물 청산 (reduceOnly)
-        let futures_order = self
+        let spot_sell_qty = self
             .trader
-            .place_futures_order(&self.params.symbol, "BUY", qty, true)
-            .await?;
+            .clamp_spot_quantity(&self.params.symbol, pair.spot_net_qty_est);
 
         // 스팟 매도
         let spot_order = self
             .trader
-            .place_spot_order(&self.params.symbol, "SELL", qty, false)
+            .place_spot_order(&self.params.symbol, "SELL", spot_sell_qty, false)
+            .await?;
+
+        // 선물 청산 (reduceOnly)
+        let futures_order = self
+            .trader
+            .place_futures_order(&self.params.symbol, "BUY", pair.fut_order_qty, true)
             .await?;
 
         Ok((futures_order, spot_order))
@@ -194,7 +219,7 @@ impl IntraBasisArbitrageStrategy {
     pub async fn open_reverse(
         &self,
         qty: f64,
-    ) -> Result<(OrderResponse, OrderResponse), ExchangeError> {
+    ) -> Result<(OrderResponse, OrderResponse, HedgedPair), ExchangeError> {
         info!(
             "Opening REVERSE position: spot SELL {} {}, futures BUY {} {}",
             qty, self.params.symbol, qty, self.params.symbol
@@ -244,38 +269,41 @@ impl IntraBasisArbitrageStrategy {
             .place_futures_order(&self.params.symbol, "BUY", final_qty, false)
             .await?;
 
-        Ok((spot_order, futures_order))
+        Ok((spot_order, futures_order, todo!()))
     }
 
     /// Reverse 포지션 클로즈: 스팟 매수 + 선물 매도 (reduceOnly)
     pub async fn close_reverse(
         &self,
-        qty: f64,
+        pair: HedgedPair,
     ) -> Result<(OrderResponse, OrderResponse), ExchangeError> {
         info!(
             "Closing REVERSE position: spot BUY {} {}, futures SELL {} {} (reduceOnly)",
-            qty, self.params.symbol, qty, self.params.symbol
+            pair.spot_order_qty, self.params.symbol, pair.fut_order_qty, self.params.symbol
         );
 
         if self.params.dry_run {
             info!(
                 "DRY RUN: futures SELL {} {} (reduceOnly)",
-                qty, self.params.symbol
+                pair.fut_order_qty, self.params.symbol
             );
-            info!("DRY RUN: spot BUY {} {}", qty, self.params.symbol);
+            info!(
+                "DRY RUN: spot BUY {} {}",
+                pair.spot_order_qty, self.params.symbol
+            );
             return Err(ExchangeError::Other("Dry run mode".to_string()));
         }
 
         // 선물 청산 (reduceOnly)
         let futures_order = self
             .trader
-            .place_futures_order(&self.params.symbol, "SELL", qty, true)
+            .place_futures_order(&self.params.symbol, "SELL", pair.fut_order_qty, true)
             .await?;
 
         // 스팟 매수
         let spot_order = self
             .trader
-            .place_spot_order(&self.params.symbol, "BUY", qty, false)
+            .place_spot_order(&self.params.symbol, "BUY", pair.spot_order_qty, false)
             .await?;
 
         Ok((futures_order, spot_order))
@@ -384,8 +412,8 @@ impl IntraBasisArbitrageStrategy {
         info!("Exit BPS: {}", self.params.exit_bps);
         info!("Notional: {} USDT", self.params.notional);
         info!(
-            "Current state: open={}, dir={:?}, qty={}",
-            state.open, state.dir, state.qty
+            "Current state: open={}, dir={:?}, pair={:?}",
+            state.open, state.dir, state.pair
         );
 
         loop {
@@ -428,8 +456,8 @@ impl IntraBasisArbitrageStrategy {
                 if should_close {
                     info!("Exit condition met. Closing position...");
                     let result = match state.dir.as_deref() {
-                        Some("carry") => self.close_carry(state.qty).await,
-                        Some("reverse") => self.close_reverse(state.qty).await,
+                        Some("carry") => self.close_carry(state.pair).await,
+                        Some("reverse") => self.close_reverse(state.pair).await,
                         _ => {
                             warn!("Unknown position direction: {:?}", state.dir);
                             continue;
@@ -443,7 +471,13 @@ impl IntraBasisArbitrageStrategy {
                                 "spot": spot_order,
                             });
 
-                            state.update_position(false, None, 0.0, Some(basis_bps), Some(actions));
+                            state.update_position(
+                                false,
+                                None,
+                                Default::default(),
+                                Some(basis_bps),
+                                Some(actions),
+                            );
                             state.write()?;
                             info!("Position closed successfully");
                         }
@@ -466,7 +500,7 @@ impl IntraBasisArbitrageStrategy {
                     info!("Entry condition met for CARRY. Opening position...");
                     let qty = self.size_from_notional(spot_price);
                     match self.open_carry(qty).await {
-                        Ok((spot_order, futures_order)) => {
+                        Ok((spot_order, futures_order, pair)) => {
                             let actions = serde_json::json!({
                                 "spot": spot_order,
                                 "futures": futures_order,
@@ -475,7 +509,7 @@ impl IntraBasisArbitrageStrategy {
                             state.update_position(
                                 true,
                                 Some("carry".to_string()),
-                                qty,
+                                pair,
                                 Some(basis_bps),
                                 Some(actions),
                             );
@@ -490,7 +524,7 @@ impl IntraBasisArbitrageStrategy {
                     info!("Entry condition met for REVERSE. Opening position...");
                     let qty = self.size_from_notional(spot_price);
                     match self.open_reverse(qty).await {
-                        Ok((spot_order, futures_order)) => {
+                        Ok((spot_order, futures_order, pair)) => {
                             let actions = serde_json::json!({
                                 "spot": spot_order,
                                 "futures": futures_order,
@@ -499,7 +533,7 @@ impl IntraBasisArbitrageStrategy {
                             state.update_position(
                                 true,
                                 Some("reverse".to_string()),
-                                qty,
+                                pair,
                                 Some(basis_bps),
                                 Some(actions),
                             );
