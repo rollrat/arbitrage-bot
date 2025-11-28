@@ -81,13 +81,24 @@ pub struct SpotData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Asset {
+pub struct SpotAsset {
     pub currency: String,
     pub total: f64,     // 총 보유량
     pub available: f64, // 사용 가능한 잔액
     pub in_use: f64,    // 주문에 사용 중인 잔액 (locked)
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FutureAsset {
+    pub symbol: String,
+    pub position_amt: f64, // 양수면 롱, 음수면 숏
+    pub updated_at: DateTime<Utc>,
+}
+
+// 하위 호환성을 위한 타입 별칭
+#[deprecated(note = "Use SpotAsset instead")]
+pub type Asset = SpotAsset;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderBook {

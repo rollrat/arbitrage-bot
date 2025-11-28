@@ -100,8 +100,8 @@ impl Default for StrategyParams {
         Self {
             symbol: "XPLUSDT".to_string(),
             mode: StrategyMode::Carry,
-            entry_bps: 2.0,
-            exit_bps: 0.2,
+            entry_bps: 6.0,
+            exit_bps: -6.0,
             notional: 6.0,
             leverage: 1,
             isolated: false,

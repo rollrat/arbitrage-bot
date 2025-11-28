@@ -56,7 +56,7 @@ impl SpotExchangeTrader for BithumbTrader {
     }
 
     async fn get_spot_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
-        let assets = self.client.fetch_assets().await?;
+        let assets = self.client.fetch_spots().await?;
         let target = asset.to_uppercase();
         Ok(assets
             .iter()

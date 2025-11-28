@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use interface::{
-    Asset, DepositWithdrawalFee, ExchangeError, ExchangeId, FeeInfo, MarketType, OrderBook,
-    PerpSnapshot, SpotSnapshot,
+    DepositWithdrawalFee, ExchangeError, ExchangeId, FeeInfo, FutureAsset, MarketType, OrderBook,
+    PerpSnapshot, SpotAsset, SpotSnapshot,
 };
 
 pub mod binance;
@@ -30,7 +30,9 @@ pub trait SpotExchange: Send + Sync {
 pub trait AssetExchange: Send + Sync {
     fn id(&self) -> ExchangeId;
 
-    async fn fetch_assets(&self) -> Result<Vec<Asset>, ExchangeError>;
+    async fn fetch_spots(&self) -> Result<Vec<SpotAsset>, ExchangeError>;
+
+    async fn fetch_futures(&self) -> Result<Vec<FutureAsset>, ExchangeError>;
 }
 
 #[async_trait]

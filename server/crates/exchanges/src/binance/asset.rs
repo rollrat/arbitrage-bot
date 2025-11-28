@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
 
-use interface::{Asset, ExchangeId};
+use interface::{ExchangeId, FutureAsset, SpotAsset};
 
 use super::super::{AssetExchange, ExchangeError};
 use super::{generate_signature, get_timestamp, BinanceClient, BASE_URL};
@@ -27,7 +27,7 @@ impl AssetExchange for BinanceClient {
         ExchangeId::Binance
     }
 
-    async fn fetch_assets(&self) -> Result<Vec<Asset>, ExchangeError> {
+    async fn fetch_spots(&self) -> Result<Vec<SpotAsset>, ExchangeError> {
         let api_key = self.api_key.as_ref().ok_or_else(|| {
             ExchangeError::Other(
                 "API key not set. Use BinanceClient::with_credentials()".to_string(),
@@ -88,7 +88,7 @@ impl AssetExchange for BinanceClient {
 
             // 잔액이 0인 경우 스킵 (선택사항)
             if total > 0.0 {
-                assets.push(Asset {
+                assets.push(SpotAsset {
                     currency: balance.asset,
                     total,
                     available: free,
@@ -99,6 +99,79 @@ impl AssetExchange for BinanceClient {
         }
 
         Ok(assets)
+    }
+
+    async fn fetch_futures(&self) -> Result<Vec<FutureAsset>, ExchangeError> {
+        let api_key = self.api_key.as_ref().ok_or_else(|| {
+            ExchangeError::Other(
+                "API key not set. Use BinanceClient::with_credentials()".to_string(),
+            )
+        })?;
+        let api_secret = self.api_secret.as_ref().ok_or_else(|| {
+            ExchangeError::Other(
+                "API secret not set. Use BinanceClient::with_credentials()".to_string(),
+            )
+        })?;
+
+        let endpoint = "/fapi/v2/positionRisk";
+        let timestamp = super::get_timestamp();
+        let query_string = format!("timestamp={}", timestamp);
+        let signature = super::generate_signature(&query_string, api_secret);
+
+        const FUTURES_BASE_URL: &str = "https://fapi.binance.com";
+        let url = format!(
+            "{}{}?{}&signature={}",
+            FUTURES_BASE_URL, endpoint, query_string, signature
+        );
+
+        let response = self
+            .http
+            .get(&url)
+            .header("X-MBX-APIKEY", api_key.as_str())
+            .send()
+            .await?;
+
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if !status.is_success() {
+            return Err(ExchangeError::Other(format!(
+                "Futures position API error: status {}, response: {}",
+                status,
+                response_text.chars().take(200).collect::<String>()
+            )));
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PositionRisk {
+            symbol: String,
+            position_amt: String,
+        }
+
+        let positions: Vec<PositionRisk> = serde_json::from_str(&response_text).map_err(|e| {
+            ExchangeError::Other(format!(
+                "Failed to parse positions: {}, response: {}",
+                e,
+                response_text.chars().take(200).collect::<String>()
+            ))
+        })?;
+
+        let now = Utc::now();
+        let mut result = Vec::new();
+        for pos in positions {
+            let position_amt: f64 = pos.position_amt.parse().unwrap_or(0.0);
+            // 포지션이 있는 경우만 추가 (0이 아닌 경우)
+            if position_amt.abs() > 1e-10 {
+                result.push(FutureAsset {
+                    symbol: pos.symbol,
+                    position_amt,
+                    updated_at: now,
+                });
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -155,7 +228,7 @@ mod tests {
             }
         };
 
-        match client.fetch_assets().await {
+        match client.fetch_spots().await {
             Ok(assets) => {
                 assert!(!assets.is_empty(), "Should fetch at least one asset");
                 println!("Successfully fetched {} assets", assets.len());

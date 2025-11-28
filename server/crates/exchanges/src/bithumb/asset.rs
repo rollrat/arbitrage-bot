@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
 
-use interface::{Asset, ExchangeId};
+use interface::{ExchangeId, FutureAsset, SpotAsset};
 
 use super::super::{AssetExchange, ExchangeError};
 use super::{generate_jwt_token, BithumbClient, BASE_URL};
@@ -29,7 +29,7 @@ impl AssetExchange for BithumbClient {
         ExchangeId::Bithumb
     }
 
-    async fn fetch_assets(&self) -> Result<Vec<Asset>, ExchangeError> {
+    async fn fetch_spots(&self) -> Result<Vec<SpotAsset>, ExchangeError> {
         let api_key = self.api_key.as_ref().ok_or_else(|| {
             ExchangeError::Other(
                 "API key not set. Use BithumbClient::with_credentials()".to_string(),
@@ -89,7 +89,7 @@ impl AssetExchange for BithumbClient {
 
             // total이 0보다 큰 경우만 추가
             if total > 0.0 {
-                assets.push(Asset {
+                assets.push(SpotAsset {
                     currency: account.currency.to_uppercase(),
                     total,
                     available: balance,
@@ -100,6 +100,11 @@ impl AssetExchange for BithumbClient {
         }
 
         Ok(assets)
+    }
+
+    async fn fetch_futures(&self) -> Result<Vec<FutureAsset>, ExchangeError> {
+        // Bithumb은 선물 거래를 지원하지 않으므로 빈 벡터 반환
+        Ok(Vec::new())
     }
 }
 
@@ -142,7 +147,7 @@ mod tests {
         skip_if_no_credentials();
 
         let client = BithumbClient::with_credentials().expect("Failed to create BithumbClient");
-        let result = client.fetch_assets().await;
+        let result = client.fetch_spots().await;
 
         match result {
             Ok(assets) => {

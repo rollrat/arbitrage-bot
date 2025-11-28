@@ -2,7 +2,7 @@ use color_eyre::eyre;
 use tracing::info;
 
 use exchanges::{AssetExchange, BinanceClient, BithumbClient};
-use interface::{Asset, UnifiedSnapshot};
+use interface::{SpotAsset, UnifiedSnapshot};
 
 const ORACLE_SERVER_URL: &str = "http://localhost:12090";
 
@@ -51,25 +51,25 @@ pub fn print_unified_snapshots(snapshots: &[UnifiedSnapshot]) {
     }
 }
 
-pub async fn fetch_bithumb_assets() -> eyre::Result<Vec<Asset>> {
+pub async fn fetch_bithumb_assets() -> eyre::Result<Vec<SpotAsset>> {
     let client = BithumbClient::with_credentials()?;
     let assets = client
-        .fetch_assets()
+        .fetch_spots()
         .await
         .map_err(|e| eyre::eyre!("자산 조회 실패: {}", e))?;
     Ok(assets)
 }
 
-pub async fn fetch_binance_assets() -> eyre::Result<Vec<Asset>> {
+pub async fn fetch_binance_assets() -> eyre::Result<Vec<SpotAsset>> {
     let client = BinanceClient::with_credentials()?;
     let assets = client
-        .fetch_assets()
+        .fetch_spots()
         .await
         .map_err(|e| eyre::eyre!("자산 조회 실패: {}", e))?;
     Ok(assets)
 }
 
-pub fn print_assets(assets: &[Asset]) {
+pub fn print_assets(assets: &[SpotAsset]) {
     info!("=== Assets (총 {}개) ===", assets.len());
 
     for asset in assets {

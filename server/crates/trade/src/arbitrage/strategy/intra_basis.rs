@@ -155,6 +155,8 @@ impl IntraBasisArbitrageStrategy {
             )));
         }
 
+        // TODO: spot order qty < fut order qty 라서 항상 손해보고 있음 고쳐야함
+
         // 스팟 매수
         let spot_order = self
             .trader
@@ -417,7 +419,7 @@ impl IntraBasisArbitrageStrategy {
         );
 
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            // tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
             // 가격 조회
             let spot_price = self

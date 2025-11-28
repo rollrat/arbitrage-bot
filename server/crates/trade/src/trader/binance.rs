@@ -368,7 +368,7 @@ impl BinanceTrader {
     pub async fn get_spot_balance(&self, asset: &str) -> Result<f64, ExchangeError> {
         let assets = self
             .spot_client
-            .fetch_assets()
+            .fetch_spots()
             .await
             .map_err(|e| ExchangeError::Other(format!("Failed to fetch spot assets: {}", e)))?;
 
