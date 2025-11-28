@@ -19,6 +19,8 @@ enum Command {
     ExploreTest,
     /// 베이시스 아비트라지 전략 테스트 (dry-run 모드)
     ArbitrageTest,
+    /// 강제 청산 테스트 (모든 자산을 USDT/KRW로 변환)
+    EmergencyTest,
 }
 
 #[tokio::main]
@@ -37,6 +39,7 @@ async fn main() -> eyre::Result<()> {
         Command::Run => run_bot().await,
         Command::ExploreTest => run_explore_test().await,
         Command::ArbitrageTest => run_arbitrage_test().await,
+        Command::EmergencyTest => run_emergency_test().await,
     }
 }
 
@@ -96,6 +99,18 @@ async fn run_arbitrage_test() -> eyre::Result<()> {
 
     info!("전략이 성공적으로 실행되었습니다.");
     info!("실제 실행을 위해서는 'run' 커맨드를 사용하세요.");
+
+    Ok(())
+}
+
+/// 강제 청산 테스트
+async fn run_emergency_test() -> eyre::Result<()> {
+    info!("강제 청산 테스트 시작...");
+    info!("주의: 이 명령은 실제 거래를 실행합니다!");
+
+    trade::emergency::liquidate_all().await?;
+
+    info!("강제 청산 테스트 완료!");
 
     Ok(())
 }
