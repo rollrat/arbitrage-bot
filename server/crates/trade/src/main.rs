@@ -65,7 +65,12 @@ pub fn init_tracing() -> TracingGuards {
     // 4) 레이어 조립
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(fmt::layer().with_ansi(false).with_writer(file_writer))
+        .with(
+            fmt::layer()
+                .with_ansi(false)
+                .with_writer(file_writer)
+                .with_filter(LevelFilter::INFO),
+        )
         .with(fmt::layer().with_writer(stdout_writer).with_ansi(true))
         .init();
 
