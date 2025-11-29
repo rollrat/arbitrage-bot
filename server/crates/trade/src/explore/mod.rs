@@ -27,9 +27,9 @@ pub fn print_unified_snapshots(snapshots: &[UnifiedSnapshot]) {
 
         if let Some(perp) = &snapshot.perp {
             println!("  Perp:");
-            println!("    Mark Price: ${:.2}", perp.mark_price);
-            println!("    OI USD: ${:.2}", perp.oi_usd);
-            println!("    Vol 24h USD: ${:.2}", perp.vol_24h_usd);
+            println!("    Mark Price: ${:.8}", perp.mark_price);
+            println!("    OI USD: ${:.8}", perp.oi_usd);
+            println!("    Vol 24h USD: ${:.8}", perp.vol_24h_usd);
             println!("    Funding Rate: {:.4}%", perp.funding_rate * 100.0);
             if let Some(next_funding) = perp.next_funding_time {
                 println!("    Next Funding: {}", next_funding);
@@ -38,14 +38,14 @@ pub fn print_unified_snapshots(snapshots: &[UnifiedSnapshot]) {
 
         if let Some(spot) = &snapshot.spot {
             println!("  Spot:");
-            println!("    Price: ${:.2}", spot.price);
-            println!("    Vol 24h USD: ${:.2}", spot.vol_24h_usd);
+            println!("    Price: ${:.8}", spot.price);
+            println!("    Vol 24h USD: ${:.8}", spot.vol_24h_usd);
         }
 
         println!("  Exchange Rates:");
-        println!("    USD/KRW: {:.2}", snapshot.exchange_rates.usd_krw);
+        println!("    USD/KRW: {:.8}", snapshot.exchange_rates.usd_krw);
         println!("    USDT/USD: {:.6}", snapshot.exchange_rates.usdt_usd);
-        println!("    USDT/KRW: {:.2}", snapshot.exchange_rates.usdt_krw);
+        println!("    USDT/KRW: {:.8}", snapshot.exchange_rates.usdt_krw);
 
         println!("  Updated At: {}", snapshot.updated_at);
     }

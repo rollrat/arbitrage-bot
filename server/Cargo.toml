@@ -16,6 +16,7 @@ axum = { version = "0.7", features = ["macros"] }
 tower = "0.5"
 tower-http = { version = "0.5", features = ["cors"] }
 tracing = "0.1"
+tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 color-eyre = "0.6"
 eyre = "0.6"

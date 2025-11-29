@@ -346,7 +346,7 @@ where
             let basis_bps = (hedge_mark - adjusted_primary) / adjusted_primary * 10_000.0;
 
             info!(
-                "Primary: {:.2}, Hedge: {:.2}, Adjusted Basis: {:.2} bps",
+                "Primary: {:.8}, Hedge: {:.8}, Adjusted Basis: {:.8} bps",
                 primary_price, hedge_mark, basis_bps
             );
 

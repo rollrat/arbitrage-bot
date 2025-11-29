@@ -170,15 +170,15 @@ impl IntraBasisArbitrageStrategy {
         info!("=== Position Closed - PnL Summary ===");
         info!("Direction: {:?}, Symbol: {}", state.dir, self.params.symbol);
         info!(
-            "Entry Basis: {:.2} bps, Exit Basis: {:.2} bps, Basis Change: {:.2} bps",
+            "Entry Basis: {:.8} bps, Exit Basis: {:.8} bps, Basis Change: {:.8} bps",
             open_basis, close_basis, basis_change
         );
         info!(
-            "Entry Prices: Spot {:.2}, Futures {:.2}",
+            "Entry Prices: Spot {:.8}, Futures {:.8}",
             open_spot_price, open_futures_price
         );
         info!(
-            "Exit Prices: Spot {:.2}, Futures {:.2}",
+            "Exit Prices: Spot {:.8}, Futures {:.8}",
             spot_price, futures_mark
         );
         info!(
@@ -190,7 +190,7 @@ impl IntraBasisArbitrageStrategy {
             spot_pnl, futures_pnl
         );
         info!(
-            "Total PnL: {:.6} USDT ({:.2} bps)",
+            "Total PnL: {:.6} USDT ({:.8} bps)",
             total_pnl, total_pnl_bps
         );
         info!("Basis-based PnL Estimate: {:.6} USDT", basis_pnl_usdt);
@@ -531,7 +531,7 @@ impl IntraBasisArbitrageStrategy {
             let basis_bps = self.compute_basis_bps(spot_price, futures_mark);
 
             trace!(
-                "Spot: {:.2}, Futures: {:.2}, Basis: {:.2} bps",
+                "Spot: {:.8}, Futures: {:.8}, Basis: {:.8} bps",
                 spot_price,
                 futures_mark,
                 basis_bps

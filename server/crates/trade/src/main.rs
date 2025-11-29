@@ -1,8 +1,12 @@
+use std::{fs::OpenOptions, path::PathBuf};
+
+use chrono::Local;
 use color_eyre::eyre;
 use exchanges::BinanceClient;
 use structopt::StructOpt;
 use tracing::info;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_appender::non_blocking;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod explore;
 
@@ -29,7 +33,7 @@ async fn main() -> eyre::Result<()> {
     color_eyre::install()?;
 
     // init logging
-    fmt().with_env_filter(EnvFilter::from_default_env()).init();
+    let _guards = init_tracing();
 
     // dotenv는 lib.rs에서 자동으로 로드됨
 
@@ -41,6 +45,62 @@ async fn main() -> eyre::Result<()> {
         Command::ArbitrageTest => run_arbitrage_test().await,
         Command::EmergencyTest => run_emergency_test().await,
     }
+}
+
+pub struct TracingGuards {
+    _file: tracing_appender::non_blocking::WorkerGuard,
+    _stdout: tracing_appender::non_blocking::WorkerGuard,
+}
+
+pub fn init_tracing() -> TracingGuards {
+    // 1) 파일 appender
+    let (file_writer, file_guard) = custom_daily_file_appender("logs", "trading");
+
+    // 2) stdout도 non-blocking
+    let (stdout_writer, stdout_guard) = non_blocking(std::io::stdout());
+
+    // 3) EnvFilter
+    let env_filter = EnvFilter::from_default_env().add_directive("info".parse().unwrap());
+
+    // 4) 레이어 조립
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt::layer().with_ansi(false).with_writer(file_writer))
+        .with(fmt::layer().with_writer(stdout_writer).with_ansi(true))
+        .init();
+
+    // guards를 리턴해서 main에서 들고 있게 만들기
+    TracingGuards {
+        _file: file_guard,
+        _stdout: stdout_guard,
+    }
+}
+
+fn custom_daily_file_appender(
+    base_dir: &str,
+    prefix: &str,
+) -> (
+    non_blocking::NonBlocking,
+    tracing_appender::non_blocking::WorkerGuard,
+) {
+    // 날짜 문자열 생성: 2025-11-29
+    let date = Local::now().format("%Y-%m-%d").to_string();
+
+    // 최종 파일 이름: trading.2025-11-29.log
+    let filename = format!("{prefix}.{date}.log");
+
+    // logs/trading.2025-11-29.log
+    let mut path = PathBuf::from(base_dir);
+    path.push(filename);
+
+    // 파일 오픈
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("Failed to open custom log file");
+
+    non_blocking(file)
 }
 
 async fn run_bot() -> eyre::Result<()> {
