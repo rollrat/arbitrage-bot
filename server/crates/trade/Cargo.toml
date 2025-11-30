@@ -38,3 +38,5 @@ structopt = { workspace = true }
 sea-orm = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }

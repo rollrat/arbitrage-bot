@@ -37,14 +37,37 @@ async fn main() -> eyre::Result<()> {
 
     // dotenv는 lib.rs에서 자동으로 로드됨
 
+    // API 서버를 백그라운드로 시작
+    let server_port = std::env::var("TRADE_API_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(12091);
+
+    let server_handle = tokio::spawn(async move {
+        if let Err(e) = trade::server::start_server(server_port).await {
+            tracing::error!("API 서버 실행 중 오류 발생: {}", e);
+        }
+    });
+
+    info!("API 서버가 포트 {}에서 시작되었습니다", server_port);
+
     let cmd = Command::from_args();
 
-    match cmd {
+    // 커맨드 실행 (서버는 백그라운드에서 계속 실행됨)
+    let result = match cmd {
         Command::Run => run_bot().await,
         Command::ExploreTest => run_explore_test().await,
         Command::ArbitrageTest => run_arbitrage_test().await,
         Command::EmergencyTest => run_emergency_test().await,
+    };
+
+    // 커맨드가 완료되어도 서버는 계속 실행되도록 대기
+    // 서버가 종료되면 프로그램도 종료됨
+    if let Err(e) = server_handle.await {
+        tracing::error!("서버 태스크 오류: {:?}", e);
     }
+
+    result
 }
 
 async fn run_bot() -> eyre::Result<()> {

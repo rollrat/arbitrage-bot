@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Container,
   Title,
@@ -14,59 +14,16 @@ import {
   Divider,
   Badge,
   Grid,
+  Loader,
+  Alert,
 } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { IconTrash, IconAlertCircle } from "@tabler/icons-react";
 import TradeTable from "./components/TradeTable";
 import PositionTable from "./components/PositionTable";
 import ConsolePanel from "./components/ConsolePanel";
 import type { TradeRecord, PositionRecord, ConsoleLog } from "./types";
 
-// 더미 데이터 생성 함수
-function generateDummyTradeRecords(): TradeRecord[] {
-  const exchanges = ["Binance", "Bithumb", "Bybit", "Okx", "Bitget"];
-  const symbols = ["BTC", "ETH", "SOL", "XRP", "ADA"];
-  const marketTypes = ["SPOT", "FUTURES"];
-  const sides = ["BUY", "SELL"];
-  const tradeTypes = ["MARKET", "LIMIT"];
-
-  return Array.from({ length: 15 }, (_, i) => ({
-    id: i + 1,
-    executed_at: new Date(Date.now() - i * 60000).toISOString(),
-    exchange: exchanges[Math.floor(Math.random() * exchanges.length)],
-    symbol: symbols[Math.floor(Math.random() * symbols.length)],
-    market_type: marketTypes[Math.floor(Math.random() * marketTypes.length)],
-    side: sides[Math.floor(Math.random() * sides.length)],
-    trade_type: tradeTypes[Math.floor(Math.random() * tradeTypes.length)],
-    executed_price: Math.random() * 100000 + 1000,
-    quantity: Math.random() * 10 + 0.1,
-    request_query_string: null,
-    api_response: null,
-    metadata: null,
-    is_liquidation: Math.random() > 0.8,
-  }));
-}
-
-function generateDummyPositionRecords(): PositionRecord[] {
-  const botNames = ["intra_basis", "cross_basis"];
-  const symbols = ["BTC", "ETH", "SOL"];
-  const exchanges = ["Binance", "Bithumb", "Bybit", "Okx", "Bitget"];
-  const carries = ["CARRY", "REVERSE"];
-  const actions = ["OPEN", "CLOSE"];
-
-  return Array.from({ length: 10 }, (_, i) => ({
-    id: i + 1,
-    executed_at: new Date(Date.now() - i * 120000).toISOString(),
-    bot_name: botNames[Math.floor(Math.random() * botNames.length)],
-    carry: carries[Math.floor(Math.random() * carries.length)],
-    action: actions[Math.floor(Math.random() * actions.length)],
-    symbol: symbols[Math.floor(Math.random() * symbols.length)],
-    spot_price: Math.random() * 100000 + 1000,
-    futures_mark: Math.random() * 100000 + 1000,
-    buy_exchange: exchanges[Math.floor(Math.random() * exchanges.length)],
-    sell_exchange: exchanges[Math.floor(Math.random() * exchanges.length)],
-  }));
-}
-
+// 더미 콘솔 로그 생성 함수 (서버에서 제공하지 않으므로 유지)
 function generateDummyConsoleLogs(): ConsoleLog[] {
   const levels: ConsoleLog["level"][] = ["info", "warn", "error", "success"];
   const messages = [
@@ -88,11 +45,11 @@ function generateDummyConsoleLogs(): ConsoleLog[] {
 }
 
 function App() {
-  const [tradeRecords] = useState<TradeRecord[]>(generateDummyTradeRecords());
-  const [positionRecords] = useState<PositionRecord[]>(
-    generateDummyPositionRecords()
-  );
+  const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
+  const [positionRecords, setPositionRecords] = useState<PositionRecord[]>([]);
   const [consoleLogs] = useState<ConsoleLog[]>(generateDummyConsoleLogs());
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isLiquidationLoading, setIsLiquidationLoading] = useState(false);
   const [consoleHeight, setConsoleHeight] = useState(200);
   const [isResizing, setIsResizing] = useState(false);
@@ -105,6 +62,46 @@ function App() {
   const resizeBarRef = useRef<HTMLDivElement>(null);
   const startYRef = useRef<number>(0);
   const startHeightRef = useRef<number>(200);
+
+  // API에서 데이터 로드
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [tradeResponse, positionResponse] = await Promise.all([
+          fetch("/api/trade-records"),
+          fetch("/api/position-records"),
+        ]);
+
+        if (!tradeResponse.ok) {
+          throw new Error(`거래 기록 조회 실패: ${tradeResponse.statusText}`);
+        }
+        if (!positionResponse.ok) {
+          throw new Error(
+            `포지션 기록 조회 실패: ${positionResponse.statusText}`
+          );
+        }
+
+        const tradeData: TradeRecord[] = await tradeResponse.json();
+        const positionData: PositionRecord[] = await positionResponse.json();
+
+        setTradeRecords(tradeData);
+        setPositionRecords(positionData);
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error
+            ? err.message
+            : "데이터를 불러오는데 실패했습니다";
+        setError(errorMessage);
+        console.error("데이터 로드 오류:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
 
   const handleForceLiquidation = async () => {
     setIsLiquidationLoading(true);
@@ -160,7 +157,7 @@ function App() {
   };
 
   // 선택된 포지션과 관련된 거래 기록 필터링
-  const getRelatedTradeRecords = (): TradeRecord[] => {
+  const relatedTradeRecords = useMemo(() => {
     if (selectedPositionId === null) return [];
 
     const selectedPosition = positionRecords.find(
@@ -168,33 +165,134 @@ function App() {
     );
     if (!selectedPosition) return [];
 
-    // 같은 bot_name, symbol, carry 조합의 OPEN과 CLOSE 포지션 찾기
-    const relatedPositions = positionRecords.filter(
-      (p) =>
-        p.bot_name === selectedPosition.bot_name &&
-        p.symbol === selectedPosition.symbol &&
-        p.carry === selectedPosition.carry
+    // 같은 bot_name, symbol, carry 조합의 모든 포지션을 시간순으로 정렬
+    const sameGroupPositions = positionRecords
+      .filter(
+        (p) =>
+          p.bot_name === selectedPosition.bot_name &&
+          p.symbol === selectedPosition.symbol &&
+          p.carry === selectedPosition.carry
+      )
+      .sort((a, b) => {
+        return (
+          new Date(a.executed_at).getTime() - new Date(b.executed_at).getTime()
+        );
+      });
+
+    // 선택된 포지션의 인덱스 찾기
+    const currentIndex = sameGroupPositions.findIndex(
+      (p) => p.id === selectedPositionId
     );
 
-    // OPEN 시간과 CLOSE 시간 찾기
-    const openPosition = relatedPositions.find((p) => p.action === "OPEN");
-    const closePosition = relatedPositions.find((p) => p.action === "CLOSE");
+    if (currentIndex === -1) return [];
 
-    if (!openPosition) return [];
+    // 선택된 포지션의 실행 시간 (이 시간 이전의 거래 기록)
+    const endTime = new Date(selectedPosition.executed_at).getTime();
 
-    const openTime = new Date(openPosition.executed_at).getTime();
-    const closeTime = closePosition
-      ? new Date(closePosition.executed_at).getTime()
-      : Date.now(); // CLOSE가 없으면 현재 시간까지
+    // 이전 포지션의 시작 시간 찾기
+    let startTime: number;
 
-    // OPEN 시간과 CLOSE 시간 사이의 거래 기록 필터링
-    return tradeRecords.filter((trade) => {
-      const tradeTime = new Date(trade.executed_at).getTime();
-      return tradeTime >= openTime && tradeTime <= closeTime;
+    if (currentIndex > 0) {
+      // 같은 조합의 이전 포지션이 있으면 그 포지션의 시작 시간 (포함)
+      startTime = new Date(
+        sameGroupPositions[currentIndex - 1].executed_at
+      ).getTime();
+    } else {
+      // 이전 포지션이 없으면 0부터 (모든 거래 기록)
+      startTime = 0;
+    }
+
+    // 디버깅: 현재 로직 확인
+    console.log("=== 포지션 필터링 디버깅 ===");
+    console.log("선택된 포지션:", {
+      id: selectedPosition.id,
+      executed_at: selectedPosition.executed_at,
+      bot_name: selectedPosition.bot_name,
+      symbol: selectedPosition.symbol,
+      carry: selectedPosition.carry,
     });
-  };
+    console.log(
+      "같은 그룹 포지션들:",
+      sameGroupPositions.map((p) => ({
+        id: p.id,
+        executed_at: p.executed_at,
+      }))
+    );
+    console.log("현재 인덱스:", currentIndex);
+    console.log(
+      "시작 시간:",
+      startTime > 0 ? new Date(startTime).toISOString() : "0 (시작)"
+    );
+    console.log("종료 시간:", new Date(endTime).toISOString());
+    console.log(
+      "이전 포지션:",
+      currentIndex > 0
+        ? {
+            id: sameGroupPositions[currentIndex - 1].id,
+            executed_at: sameGroupPositions[currentIndex - 1].executed_at,
+          }
+        : "없음"
+    );
 
-  const relatedTradeRecords = getRelatedTradeRecords();
+    // 이전 포지션의 실행 시간 이후부터 선택된 포지션의 실행 시간 이전까지의 거래 기록 필터링
+    const filtered = tradeRecords.filter((trade) => {
+      const tradeTime = new Date(trade.executed_at).getTime();
+      // startTime 이상이고 endTime 미만 (포지션 실행 시간 이전의 거래 기록)
+      return tradeTime >= startTime && tradeTime < endTime;
+    });
+
+    console.log("필터링된 거래 기록 수:", filtered.length);
+    console.log(
+      "필터링된 거래 기록 시간 범위:",
+      filtered.length > 0
+        ? {
+            첫번째: new Date(filtered[0].executed_at).toISOString(),
+            마지막: new Date(
+              filtered[filtered.length - 1].executed_at
+            ).toISOString(),
+          }
+        : "없음"
+    );
+    console.log("===========================");
+
+    return filtered;
+  }, [selectedPositionId, positionRecords, tradeRecords]);
+
+  if (isLoading) {
+    return (
+      <Container
+        size="1600px"
+        py="xl"
+        style={{
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Stack align="center" gap="md">
+          <Loader size="lg" />
+          <Text size="lg" c="dimmed">
+            데이터를 불러오는 중...
+          </Text>
+        </Stack>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container size="1600px" py="xl">
+        <Alert
+          icon={<IconAlertCircle size={16} />}
+          title="오류 발생"
+          color="red"
+        >
+          {error}
+        </Alert>
+      </Container>
+    );
+  }
 
   return (
     <Container
@@ -599,7 +697,9 @@ function App() {
                               fontFamily: "monospace",
                             }}
                           >
-                            {selectedTradeRecord.request_query_string}
+                            {selectedTradeRecord.request_query_string
+                              .split("&")
+                              .join("\n")}
                           </Code>
                         </Paper>
                       </Paper>

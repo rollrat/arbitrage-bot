@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -161,6 +162,9 @@ pub trait TradeRecordRepository: Send + Sync {
         end: DateTime<Utc>,
         limit: Option<u64>,
     ) -> Result<Vec<StoredTradeRecord>, RecordError>;
+
+    /// 모든 거래 기록 조회
+    async fn find_all(&self, limit: Option<u64>) -> Result<Vec<StoredTradeRecord>, RecordError>;
 }
 
 /// 저장소에 저장된 거래 기록 (ID 포함)
@@ -171,6 +175,106 @@ pub struct StoredTradeRecord {
     /// 거래 기록 데이터
     #[serde(flatten)]
     pub record: TradeRecord,
+}
+
+/// SeaORM trade_record::Model을 StoredTradeRecord로 변환
+impl TryFrom<super::entities::trade_record::Model> for StoredTradeRecord {
+    type Error = RecordError;
+
+    fn try_from(model: super::entities::trade_record::Model) -> Result<Self, Self::Error> {
+        let executed_at = DateTime::parse_from_rfc3339(&model.executed_at)
+            .map_err(|e| RecordError::Other(format!("Failed to parse executed_at: {}", e)))?
+            .with_timezone(&Utc);
+
+        let market_type =
+            MarketType::from_str(&model.market_type).map_err(|e| RecordError::Other(e))?;
+
+        let side = TradeSide::from_str(&model.side).map_err(|e| RecordError::Other(e))?;
+
+        let trade_type =
+            TradeType::from_str(&model.trade_type).map_err(|e| RecordError::Other(e))?;
+
+        let record = TradeRecord {
+            executed_at,
+            exchange: model.exchange,
+            symbol: model.symbol,
+            market_type,
+            side,
+            trade_type,
+            executed_price: model.executed_price,
+            quantity: model.quantity,
+            request_query_string: model.request_query_string,
+            api_response: model.api_response,
+            metadata: model.metadata,
+            is_liquidation: model.is_liquidation,
+        };
+
+        Ok(StoredTradeRecord {
+            id: model.id,
+            record,
+        })
+    }
+}
+
+/// 포지션 기록 데이터 구조
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionRecord {
+    /// 포지션 UTC 시간
+    pub executed_at: DateTime<Utc>,
+    /// 봇 이름
+    pub bot_name: String,
+    /// 포지션 방향 (CARRY, REVERSE)
+    pub carry: String,
+    /// 포지션 액션 (OPEN, CLOSE)
+    pub action: String,
+    /// 코인 심볼
+    pub symbol: String,
+    /// 스팟 가격
+    pub spot_price: f64,
+    /// 선물 마크 가격
+    pub futures_mark: f64,
+    /// 매수 거래소 이름
+    pub buy_exchange: String,
+    /// 매도 거래소 이름
+    pub sell_exchange: String,
+}
+
+/// 저장소에 저장된 포지션 기록 (ID 포함)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredPositionRecord {
+    /// 데이터베이스 ID
+    pub id: i64,
+    /// 포지션 기록 데이터
+    #[serde(flatten)]
+    pub record: PositionRecord,
+}
+
+/// SeaORM position_record::Model을 StoredPositionRecord로 변환
+impl TryFrom<super::entities::position_record::Model> for StoredPositionRecord {
+    type Error = RecordError;
+
+    fn try_from(model: super::entities::position_record::Model) -> Result<Self, Self::Error> {
+        let executed_at = DateTime::parse_from_rfc3339(&model.executed_at)
+            .map_err(|e| RecordError::Other(format!("Failed to parse executed_at: {}", e)))?
+            .with_timezone(&Utc);
+
+        let record = PositionRecord {
+            executed_at,
+            bot_name: model.bot_name,
+            carry: model.carry,
+            action: model.action,
+            symbol: model.symbol,
+            spot_price: model.spot_price,
+            futures_mark: model.futures_mark,
+            buy_exchange: model.buy_exchange,
+            sell_exchange: model.sell_exchange,
+        };
+
+        Ok(StoredPositionRecord {
+            id: model.id,
+            record,
+        })
+    }
 }
 
 /// 포지션 기록 저장소 인터페이스
@@ -189,6 +293,9 @@ pub trait PositionRecordRepository: Send + Sync {
         buy_exchange: &str,
         sell_exchange: &str,
     ) -> Result<(), RecordError>;
+
+    /// 모든 포지션 기록 조회
+    async fn find_all(&self, limit: Option<u64>) -> Result<Vec<StoredPositionRecord>, RecordError>;
 }
 
 /// 기록 저장소 에러 타입

@@ -4,16 +4,16 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, Schema, Set,
 };
+use std::convert::TryInto;
 use std::env;
 use std::path::PathBuf;
-use std::str::FromStr;
 use tracing::info;
 
 use super::entities::position_record;
 use super::entities::trade_record;
 use super::{
-    MarketType, PositionRecordRepository, RecordError, StoredTradeRecord, TradeRecord,
-    TradeRecordRepository, TradeSide, TradeType,
+    PositionRecordRepository, RecordError, StoredPositionRecord, StoredTradeRecord, TradeRecord,
+    TradeRecordRepository,
 };
 
 /// SQLite 기반 거래 기록 저장소
@@ -171,7 +171,7 @@ impl TradeRecordRepository for SqliteTradeRecordRepository {
             .map_err(|e| RecordError::Database(e))?;
 
         match model {
-            Some(m) => Ok(Some(model_to_stored_record(m)?)),
+            Some(m) => Ok(Some(m.try_into()?)),
             None => Ok(None),
         }
     }
@@ -194,7 +194,7 @@ impl TradeRecordRepository for SqliteTradeRecordRepository {
             .await
             .map_err(|e| RecordError::Database(e))?;
 
-        models.into_iter().map(model_to_stored_record).collect()
+        models.into_iter().map(|m| m.try_into()).collect()
     }
 
     async fn find_by_exchange(
@@ -215,7 +215,7 @@ impl TradeRecordRepository for SqliteTradeRecordRepository {
             .await
             .map_err(|e| RecordError::Database(e))?;
 
-        models.into_iter().map(model_to_stored_record).collect()
+        models.into_iter().map(|m| m.try_into()).collect()
     }
 
     async fn find_by_date_range(
@@ -241,42 +241,24 @@ impl TradeRecordRepository for SqliteTradeRecordRepository {
             .await
             .map_err(|e| RecordError::Database(e))?;
 
-        models.into_iter().map(model_to_stored_record).collect()
+        models.into_iter().map(|m| m.try_into()).collect()
     }
-}
 
-/// SeaORM Model을 StoredTradeRecord로 변환
-fn model_to_stored_record(model: trade_record::Model) -> Result<StoredTradeRecord, RecordError> {
-    let executed_at = DateTime::parse_from_rfc3339(&model.executed_at)
-        .map_err(|e| RecordError::Other(format!("Failed to parse executed_at: {}", e)))?
-        .with_timezone(&Utc);
+    async fn find_all(&self, limit: Option<u64>) -> Result<Vec<StoredTradeRecord>, RecordError> {
+        let mut query =
+            trade_record::Entity::find().order_by_desc(trade_record::Column::ExecutedAt);
 
-    let market_type =
-        MarketType::from_str(&model.market_type).map_err(|e| RecordError::Other(e))?;
+        if let Some(limit_val) = limit {
+            query = query.limit(limit_val);
+        }
 
-    let side = TradeSide::from_str(&model.side).map_err(|e| RecordError::Other(e))?;
+        let models = query
+            .all(&self.db)
+            .await
+            .map_err(|e| RecordError::Database(e))?;
 
-    let trade_type = TradeType::from_str(&model.trade_type).map_err(|e| RecordError::Other(e))?;
-
-    let record = TradeRecord {
-        executed_at,
-        exchange: model.exchange,
-        symbol: model.symbol,
-        market_type,
-        side,
-        trade_type,
-        executed_price: model.executed_price,
-        quantity: model.quantity,
-        request_query_string: model.request_query_string,
-        api_response: model.api_response,
-        metadata: model.metadata,
-        is_liquidation: model.is_liquidation,
-    };
-
-    Ok(StoredTradeRecord {
-        id: model.id,
-        record,
-    })
+        models.into_iter().map(|m| m.try_into()).collect()
+    }
 }
 
 // ============================================================================
@@ -367,5 +349,21 @@ impl PositionRecordRepository for SqlitePositionRecordRepository {
             .map_err(|e| RecordError::Database(e))?;
 
         Ok(())
+    }
+
+    async fn find_all(&self, limit: Option<u64>) -> Result<Vec<StoredPositionRecord>, RecordError> {
+        let mut query =
+            position_record::Entity::find().order_by_desc(position_record::Column::ExecutedAt);
+
+        if let Some(limit_val) = limit {
+            query = query.limit(limit_val);
+        }
+
+        let models = query
+            .all(&self.db)
+            .await
+            .map_err(|e| RecordError::Database(e))?;
+
+        models.into_iter().map(|m| m.try_into()).collect()
     }
 }

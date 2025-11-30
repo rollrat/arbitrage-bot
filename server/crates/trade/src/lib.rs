@@ -21,4 +21,5 @@ pub mod emergency;
 pub mod explore;
 pub mod logger;
 pub mod record;
+pub mod server;
 pub mod trader;
