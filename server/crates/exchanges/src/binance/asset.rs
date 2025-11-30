@@ -115,7 +115,7 @@ impl AssetExchange for BinanceClient {
 
         let endpoint = "/fapi/v2/positionRisk";
         let timestamp = super::get_timestamp();
-        let query_string = format!("timestamp={}", timestamp);
+        let query_string = format!("timestamp={}&recvWindow=50000", timestamp);
         let signature = super::generate_signature(&query_string, api_secret);
 
         const FUTURES_BASE_URL: &str = "https://fapi.binance.com";

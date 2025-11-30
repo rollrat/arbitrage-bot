@@ -6,7 +6,7 @@ use exchanges::BinanceClient;
 use structopt::StructOpt;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_appender::non_blocking;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod explore;
 
@@ -34,6 +34,11 @@ async fn main() -> eyre::Result<()> {
 
     // init logging
     let _guards = init_tracing();
+
+    // init trade record repository
+    trade::record::init_global_repository()
+        .await
+        .map_err(|e| eyre::eyre!("거래 기록 저장소 초기화 실패: {}", e))?;
 
     // dotenv는 lib.rs에서 자동으로 로드됨
 

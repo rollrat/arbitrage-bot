@@ -15,3 +15,5 @@ Cargo.lock
 
 *.json
 .env
+*.db
+logs/*

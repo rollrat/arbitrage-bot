@@ -19,4 +19,5 @@ fn setup() {
 pub mod arbitrage;
 pub mod emergency;
 pub mod explore;
+pub mod record;
 pub mod trader;

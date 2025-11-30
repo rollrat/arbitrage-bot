@@ -1,7 +1,7 @@
 [package]
 name = "trade"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "trade"
@@ -35,5 +35,6 @@ ctor = { workspace = true }
 jsonwebtoken = { workspace = true }
 uuid = { workspace = true }
 structopt = { workspace = true }
+sea-orm = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }

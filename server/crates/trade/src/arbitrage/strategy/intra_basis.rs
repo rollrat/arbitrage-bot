@@ -566,9 +566,7 @@ impl IntraBasisArbitrageStrategy {
 
             trace!(
                 "Spot: {:.8}, Futures: {:.8}, Basis: {:.8} bps",
-                spot_price,
-                futures_mark,
-                basis_bps
+                spot_price, futures_mark, basis_bps
             );
 
             if state.open {
@@ -594,6 +592,26 @@ impl IntraBasisArbitrageStrategy {
                         Ok((futures_order, spot_order)) => {
                             // 포지션 이득 계산 및 로깅
                             self.log_position_pnl(&state, spot_price, futures_mark, basis_bps);
+
+                            // 포지션 닫기 기록 저장 (새로운 position_records 테이블)
+                            if let Some(dir) = state.dir.as_deref() {
+                                if let Some(carry_upper) = match dir {
+                                    "carry" => Some("CARRY"),
+                                    "reverse" => Some("REVERSE"),
+                                    _ => None,
+                                } {
+                                    crate::record::save_position_record(
+                                        "intra_basis",
+                                        carry_upper,
+                                        "CLOSE",
+                                        &self.params.symbol,
+                                        spot_price,
+                                        futures_mark,
+                                        self.trader.exchange_name(),
+                                    )
+                                    .await;
+                                }
+                            }
 
                             let actions = serde_json::json!({
                                 "futures": futures_order,
@@ -630,6 +648,18 @@ impl IntraBasisArbitrageStrategy {
                     let qty = self.size_from_notional(spot_price);
                     match self.open_carry(qty).await {
                         Ok((spot_order, futures_order, pair)) => {
+                            // 포지션 열기 기록 저장 (새로운 position_records 테이블)
+                            crate::record::save_position_record(
+                                "intra_basis",
+                                "CARRY",
+                                "OPEN",
+                                &self.params.symbol,
+                                spot_price,
+                                futures_mark,
+                                self.trader.exchange_name(),
+                            )
+                            .await;
+
                             let actions = serde_json::json!({
                                 "spot": spot_order,
                                 "futures": futures_order,
@@ -654,6 +684,18 @@ impl IntraBasisArbitrageStrategy {
                     let qty = self.size_from_notional(spot_price);
                     match self.open_reverse(qty).await {
                         Ok((spot_order, futures_order, pair)) => {
+                            // 포지션 열기 기록 저장 (새로운 position_records 테이블)
+                            crate::record::save_position_record(
+                                "intra_basis",
+                                "REVERSE",
+                                "OPEN",
+                                &self.params.symbol,
+                                spot_price,
+                                futures_mark,
+                                self.trader.exchange_name(),
+                            )
+                            .await;
+
                             let actions = serde_json::json!({
                                 "spot": spot_order,
                                 "futures": futures_order,

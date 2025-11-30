@@ -156,6 +156,11 @@ impl BinanceTrader {
         })
     }
 
+    /// 거래소 이름 반환
+    pub fn exchange_name(&self) -> &'static str {
+        "binance"
+    }
+
     /// 특정 심볼에 대한 WebSocket 리스너 시작
     /// 스팟 ticker와 선물 markPrice를 동시에 구독
     pub fn start_websocket_listener(&self, symbol: &str) {
@@ -902,6 +907,20 @@ impl BinanceTrader {
         let order: OrderResponse = serde_json::from_str(&response_text)
             .map_err(|e| ExchangeError::Other(format!("Failed to parse order response: {}", e)))?;
 
+        // 거래 기록 저장 (test 모드가 아닐 때만)
+        if !test {
+            crate::record::save_trade_record_spot_order(
+                "binance",
+                symbol,
+                side,
+                quantity,
+                &query_string,
+                &order,
+                false,
+            )
+            .await;
+        }
+
         Ok(order)
     }
 
@@ -970,6 +989,19 @@ impl BinanceTrader {
 
         let order: OrderResponse = serde_json::from_str(&response_text)
             .map_err(|e| ExchangeError::Other(format!("Failed to parse order response: {}", e)))?;
+
+        // 거래 기록 저장
+        crate::record::save_trade_record_futures_order(
+            "binance",
+            symbol,
+            side,
+            quantity,
+            &query_string,
+            &order,
+            reduce_only,
+            false, // is_liquidation: reduce_only는 정상 포지션 청산이지 강제 청산이 아님
+        )
+        .await;
 
         Ok(order)
     }

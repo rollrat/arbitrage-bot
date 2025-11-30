@@ -98,10 +98,10 @@ pub struct StrategyParams {
 impl Default for StrategyParams {
     fn default() -> Self {
         Self {
-            symbol: "XPLUSDT".to_string(),
+            symbol: "HEMIUSDT".to_string(),
             mode: StrategyMode::Carry,
-            entry_bps: 6.0,
-            exit_bps: -6.0,
+            entry_bps: 30.0,
+            exit_bps: -10.0,
             notional: 6.0,
             leverage: 1,
             isolated: false,

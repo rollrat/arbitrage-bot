@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
@@ -8,8 +8,8 @@ use sha2::Sha512;
 use tracing::{info, warn};
 
 use exchanges::{
-    bithumb::{self, BithumbClient, BASE_URL},
     AssetExchange,
+    bithumb::{self, BASE_URL, BithumbClient},
 };
 use interface::ExchangeError;
 
@@ -125,11 +125,7 @@ impl BithumbTrader {
         }
         let steps = (qty / step).floor();
         let clamped = steps * step;
-        if clamped.is_finite() {
-            clamped
-        } else {
-            0.0
-        }
+        if clamped.is_finite() { clamped } else { 0.0 }
     }
 
     fn sign_request(
@@ -236,7 +232,7 @@ impl BithumbTrader {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        Ok(OrderResponse {
+        let order_response = OrderResponse {
             symbol: symbol.to_string(),
             order_id,
             client_order_id: data
@@ -246,7 +242,21 @@ impl BithumbTrader {
             executed_qty,
             status,
             extra: data,
-        })
+        };
+
+        // 거래 기록 저장
+        crate::record::save_trade_record_bithumb_order(
+            "bithumb",
+            symbol,
+            endpoint,
+            qty,
+            &params,
+            &order_response,
+            false,
+        )
+        .await;
+
+        Ok(order_response)
     }
 
     async fn fetch_price(&self, symbol: &str) -> Result<f64, ExchangeError> {
