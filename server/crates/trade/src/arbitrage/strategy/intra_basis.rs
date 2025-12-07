@@ -5,7 +5,7 @@ use tracing::{info, trace, warn};
 use super::super::state::ArbitrageState;
 use super::{StrategyMode, StrategyParams};
 use crate::trader::binance::HedgedPair;
-use crate::trader::{BinanceTrader, OrderResponse};
+use crate::trader::{BinanceTrader, FuturesExchangeTrader, OrderResponse};
 
 /// 단일 거래소(Binance) 안에서 스팟/선물 간 베이시스(가격 격차)를 이용해
 /// 델타-뉴트럴 포지션을 자동으로 관리하는 인트라(intra) 베이시스 아비트라지 전략.
@@ -214,7 +214,6 @@ impl IntraBasisArbitrageStrategy {
 
         let fee = self
             .trader
-            .spot_client
             .get_trade_fee_for_symbol(&self.params.symbol)
             .await?;
 
@@ -350,7 +349,6 @@ impl IntraBasisArbitrageStrategy {
         // 수수료 정보 가져오기
         let fee = self
             .trader
-            .spot_client
             .get_trade_fee_for_symbol(&self.params.symbol)
             .await?;
 
@@ -509,7 +507,7 @@ impl IntraBasisArbitrageStrategy {
 
         // 선물 설정 확인
         self.trader
-            .ensure_futures_setup(
+            .ensure_account_setup(
                 &self.params.symbol,
                 self.params.leverage,
                 self.params.isolated,
